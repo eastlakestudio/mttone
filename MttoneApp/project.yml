@@ -1,0 +1,71 @@
+name: Mttone
+options:
+  bundleIdPrefix: com.eastlakestudio
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+packages:
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit.git
+    from: 0.9.0
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: "5.9"
+
+targets:
+  Mttone:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - Mttone
+    dependencies:
+      - package: WhisperKit
+    settings:
+      base:
+        INFOPLIST_FILE: Mttone/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.mttone
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "YES"
+    info:
+      path: Mttone/Info.plist
+      properties:
+        CFBundleName: Mttone
+        CFBundleDisplayName: Mttone
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSMicrophoneUsageDescription: "Mttone 需要访问麦克风以录制会议音频"
+        NSSpeechRecognitionUsageDescription: "Mttone 需要语音识别权限以进行实时语音转写"
+    entitlements:
+      path: Mttone/Mttone.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.device.audio-input: true
+
+  MttoneTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - MttoneTests
+    dependencies:
+      - target: Mttone
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.mttone.tests

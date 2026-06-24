@@ -1,0 +1,338 @@
+import SwiftUI
+
+/// 录音 ViewModel：协调 AudioRecorder、DatabaseManager 和 UI 状态
+@MainActor
+@Observable
+final class RecordingViewModel {
+
+    // MARK: - UI 状态
+
+    var meetingStatus: MeetingStatus = .idle
+    var currentMeeting: Meeting?
+    var transcriptSegments: [TranscriptSegment] = []
+    var recordingDuration: TimeInterval = 0
+    var showNewMeetingSheet = false
+    var errorAlert: String?
+
+    // MARK: - 新建会议表单
+
+    var formTitle = ""
+    var formLocation = ""
+    var formAttendees = ""
+    var shouldExtendLastMeeting = false // 是否延续上一次会议的开关
+
+    enum MeetingStatus {
+        case idle
+        case recording
+        case reviewing
+    }
+
+    // MARK: - 依赖
+
+    var audioPlayer = AudioPlayer() // 回放播放器
+    private let audioRecorder: AudioRecorder
+    private let databaseManager: DatabaseManager
+    
+    // 离线转写状态
+    var isTranscribingOffline: Bool = false
+    
+    // 定时器
+    private var durationTimer: Timer?
+
+    init(audioRecorder: AudioRecorder, databaseManager: DatabaseManager) {
+        self.audioRecorder = audioRecorder
+        self.databaseManager = databaseManager
+    }
+
+    // MARK: - 录音控制
+
+    /// 用户点击"开始新录音"
+    func onTapStartRecording() {
+        showNewMeetingSheet = true
+    }
+
+    /// 用户在弹窗中确认开始
+    func startRecording() async {
+        showNewMeetingSheet = false
+
+        // 1. 请求权限
+        let granted = await audioRecorder.requestPermissions()
+        guard granted else {
+            errorAlert = audioRecorder.errorMessage ?? "权限被拒绝"
+            return
+        }
+
+        // 2. 创建会议记录
+        let title = formTitle.isEmpty
+            ? "会议记录_\(formattedDate)"
+            : formTitle
+
+        // 如果勾选了延续上一次会议，则获取上一次会议的 ID
+        var parentId: String? = nil
+        if shouldExtendLastMeeting {
+            parentId = databaseManager.fetchLastMeetingId()
+        }
+
+        let meeting = Meeting.create(
+            title: title,
+            location: formLocation.isEmpty ? nil : formLocation,
+            parentMeetingId: parentId
+        )
+
+        do {
+            try databaseManager.createMeeting(meeting)
+        } catch {
+            errorAlert = "创建会议失败: \(error.localizedDescription)"
+            return
+        }
+
+        // 3. 启动录音，传入上下文高频词汇（如标题、地点、参会人）
+        let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let audioPath = audioDir.appendingPathComponent("audio_\(meeting.id).m4a")
+
+        var contextualWords: [String] = []
+        if !formTitle.isEmpty { contextualWords.append(formTitle) }
+        if !formLocation.isEmpty { contextualWords.append(formLocation) }
+        if !formAttendees.isEmpty { contextualWords.append(contentsOf: formAttendees.split(separator: " ").map(String.init)) }
+
+        do {
+            try audioRecorder.startRecording(meetingId: meeting.id, savePath: audioPath, contextualStrings: contextualWords)
+        } catch {
+            errorAlert = "启动录音失败: \(error.localizedDescription)"
+            return
+        }
+
+        // 4. 更新状态
+        currentMeeting = meeting
+        meetingStatus = .recording
+        recordingDuration = 0
+        transcriptSegments = []
+        resetForm()
+
+        // 5. 启动计时器
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.recordingDuration += 1
+                self.transcriptSegments = self.audioRecorder.segments
+            }
+        }
+        self.durationTimer = timer
+    }
+
+    /// 停止录音，进入回顾模式
+    func stopRecording() {
+        durationTimer?.invalidate()
+        durationTimer = nil
+
+        let duration = audioRecorder.stopRecording()
+
+        // 更新数据库状态并补充音频路径
+        if let meeting = currentMeeting {
+            let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let audioPath = audioDir.appendingPathComponent("audio_\(meeting.id).m4a").path
+            
+            // 更新数据库
+            try? databaseManager.updateMeetingStatus(
+                id: meeting.id,
+                status: .pendingDiarization,
+                duration: duration
+            )
+            
+            // 确保本地对象里也更新一下音频路径以便播放
+            currentMeeting?.audioPath = audioPath
+            
+            // 设置播放器总时长为录音实际秒数
+            audioPlayer.duration = TimeInterval(duration)
+            audioPlayer.currentTime = 0
+        }
+
+        // 最终同步 segments，并强制将它们标记为 final（因为引擎已经被强行停止，可能来不及发出 final 标志）
+        transcriptSegments = audioRecorder.segments.map { segment in
+            var s = segment
+            s.isFinal = true
+            return s
+        }
+
+        // 延迟 0.15 秒改变状态，确保 macOS 文件句柄从写入锁定状态安全释放
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            self.meetingStatus = .reviewing
+            self.runOfflineTranscription()
+        }
+    }
+
+    /// 运行本地大模型进行高精度离线转写
+    private func runOfflineTranscription() {
+        guard let meeting = currentMeeting else { return }
+        let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let audioURL = audioDir.appendingPathComponent("audio_\(meeting.id).m4a")
+
+        isTranscribingOffline = true
+        Task {
+            do {
+                // 初始化模型（首次会自动下载）
+                try await WhisperService.shared.initialize()
+                
+                // 并行执行转写与声纹分离
+                async let whisperTask = WhisperService.shared.transcribe(audioURL: audioURL, meetingId: meeting.id)
+                async let diarizationTask = DiarizationService.shared.diarize(audioURL: audioURL)
+                
+                let offlineSegments = try await whisperTask
+                let speakerSegments = try await diarizationTask
+                
+                // 将分离出的说话人标签精准对齐到每一句话上
+                let alignedSegments = self.alignSpeakerLabels(transcripts: offlineSegments, diarization: speakerSegments)
+                
+                // 回到主线程更新 UI 并持久化
+                await MainActor.run {
+                    if alignedSegments.isEmpty == false {
+                        self.transcriptSegments = alignedSegments
+                    }
+                    self.saveSegmentsToDatabase(meetingId: meeting.id)
+                    self.isTranscribingOffline = false
+                }
+            } catch {
+                print("[RecordingViewModel] 离线大模型转写失败: \(error)")
+                await MainActor.run {
+                    // 如果大模型转写失败，保留原生识别的片段并持久化
+                    self.saveSegmentsToDatabase(meetingId: meeting.id)
+                    self.isTranscribingOffline = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - 持久化与加载
+    
+    /// 从数据库加载历史转写记录
+    func loadSegmentsFromDatabase(meetingId: String) {
+        let clips = databaseManager.fetchSpeechClips(meetingId: meetingId)
+        transcriptSegments = clips.map { clip in
+            TranscriptSegment(
+                id: clip.id,
+                startTime: clip.startTime,
+                endTime: clip.endTime,
+                text: clip.originalText,
+                speakerLabel: clip.speakerLabel,
+                isFinal: true
+            )
+        }
+    }
+    
+    /// 将当前内存中的片段持久化到数据库
+    private func saveSegmentsToDatabase(meetingId: String) {
+        do {
+            try databaseManager.deleteSpeechClips(meetingId: meetingId)
+            for segment in transcriptSegments {
+                let clip = SpeechClip(
+                    id: segment.id,
+                    meetingId: meetingId,
+                    speakerLabel: segment.speakerLabel,
+                    contactId: nil,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime,
+                    originalText: segment.text,
+                    cleanedText: nil,
+                    audioClipPath: nil,
+                    isKeyClip: false
+                )
+                try databaseManager.saveSpeechClip(clip)
+            }
+        } catch {
+            print("[RecordingViewModel] ERROR: Failed to save segments to database: \(error)")
+        }
+    }
+
+    /// 更新片段文本
+    func updateSegmentText(id: String, newText: String) {
+        if let index = transcriptSegments.firstIndex(where: { $0.id == id }) {
+            transcriptSegments[index].text = newText
+        }
+    }
+
+    /// 更新片段发言人标签
+    func updateSpeakerLabel(id: String, newLabel: String) {
+        if let index = transcriptSegments.firstIndex(where: { $0.id == id }) {
+            let oldLabel = transcriptSegments[index].speakerLabel
+            // 这里也可以做全局替换：把所有旧 label 都换成新的
+            for i in 0..<transcriptSegments.count {
+                if transcriptSegments[i].speakerLabel == oldLabel {
+                    transcriptSegments[i].speakerLabel = newLabel
+                }
+            }
+        }
+    }
+
+    /// 返回首页
+    func finishReview() {
+        if let meeting = currentMeeting {
+            // 在返回首页前，将用户的任何手工修改（文字、标签）覆盖保存到数据库
+            saveSegmentsToDatabase(meetingId: meeting.id)
+        }
+        
+        audioPlayer.stop() // 回收播放器资源
+        meetingStatus = .idle
+        currentMeeting = nil
+        transcriptSegments = []
+        recordingDuration = 0
+    }
+
+    // MARK: - 格式化
+
+    var formattedDuration: String {
+        let mins = Int(recordingDuration) / 60
+        let secs = Int(recordingDuration) % 60
+        return String(format: "%02d:%02d", mins, secs)
+    }
+
+    var currentAmplitude: Float {
+        audioRecorder.currentAmplitude
+    }
+
+    // MARK: - 私有方法
+
+    private var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
+    }
+
+    private func resetForm() {
+        formTitle = ""
+        formLocation = ""
+        formAttendees = ""
+        shouldExtendLastMeeting = false
+    }
+
+    /// 双模态对齐聚类算法：将声纹分离出的纯时间区间，匹配到带有文字的时间区间上
+    private func alignSpeakerLabels(transcripts: [TranscriptSegment], diarization: [DiarizedSegment]) -> [TranscriptSegment] {
+        var results = transcripts
+        
+        for i in 0..<results.count {
+            let tSegment = results[i]
+            var bestSpeaker = "Speaker_1"
+            var maxOverlap: Double = 0.0
+            
+            for dSegment in diarization {
+                // 计算两个时间区间的重叠面积 (Intersection over Union - 核心思路)
+                let overlapStart = max(tSegment.startTime, dSegment.startTime)
+                let overlapEnd = min(tSegment.endTime, dSegment.endTime)
+                
+                if overlapEnd > overlapStart {
+                    let overlapDuration = overlapEnd - overlapStart
+                    if overlapDuration > maxOverlap {
+                        maxOverlap = overlapDuration
+                        bestSpeaker = dSegment.speakerId
+                    }
+                }
+            }
+            
+            // 如果存在重叠，就将分离出的最佳说话人赋予文字气泡
+            if maxOverlap > 0 {
+                results[i].speakerLabel = bestSpeaker
+            }
+        }
+        
+        return results
+    }
+}

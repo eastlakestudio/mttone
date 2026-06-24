@@ -1,0 +1,525 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		135FCA799A648AC981076DFF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E4D1A62FD5CB56CE9768BC6 /* ContentView.swift */; };
+		29B59C00C8DD18157EC2C8A3 /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BF59495461B1E1C728377EB /* AudioPlayer.swift */; };
+		370421ADC1D49DA6F227C67C /* DatabaseManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D88638556D79E746AEBE1C /* DatabaseManager.swift */; };
+		3776B0181D3B2C69BF6BED04 /* DatabaseManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41A4EE5335279DEFA57A72BF /* DatabaseManagerTests.swift */; };
+		3ADC53B688960A6B8F2E1192 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 3BB7701F1C2C24C48A2CEFEE /* WhisperKit */; };
+		5EA3DA8DDB5C39287DD52013 /* MeetingListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A907FBA119F12ECAD0441546 /* MeetingListViewModel.swift */; };
+		6811748F03BD5E3AACC4B70F /* MeetingListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8089528154527CD6E30B16BF /* MeetingListView.swift */; };
+		8FA743828F2592C216A0B4C7 /* NewMeetingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88BCE9A6467E7D0DDE679573 /* NewMeetingSheet.swift */; };
+		9FC1A6D7628C0BC487C328A0 /* RecordingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BC9C9EF9500B7DB27B3CB1 /* RecordingViewModel.swift */; };
+		B2B5F43C9107E8D53DDA6DDC /* WhisperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A8D65D374BDD853E7E880E /* WhisperService.swift */; };
+		B5C218234E38099876BF0951 /* ReviewingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A1D44AA728FD1B860453681 /* ReviewingView.swift */; };
+		C0D96642A3D2D2501FA6FFF7 /* RecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74900502C2069088EAF7E361 /* RecordingView.swift */; };
+		CEED15D15D302FBB549DA7C1 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50BAD39A19751BCB3E8251BA /* Models.swift */; };
+		DCC2351375A1793F976BD6D5 /* DiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A293A12B84005EC11E00228 /* DiarizationService.swift */; };
+		EB0A5E29E4BE7F650E5E197D /* MttoneApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9746A8B0D288B51BBD828F41 /* MttoneApp.swift */; };
+		F731CD0356F6509D303B047F /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B844239906D4685454BA0155 /* AudioRecorder.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BE9D72CE48D0C1BA88C6B2B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 33F304D30060C94873131D06 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 80BE89D9C9B62B0A283BAB7F;
+			remoteInfo = Mttone;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		08BC9C9EF9500B7DB27B3CB1 /* RecordingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingViewModel.swift; sourceTree = "<group>"; };
+		1631C06F256BB0DFC8D8ABC1 /* Mttone.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Mttone.entitlements; sourceTree = "<group>"; };
+		2A293A12B84005EC11E00228 /* DiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarizationService.swift; sourceTree = "<group>"; };
+		3D054F21A9B88FEBCE7C5CF1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		41A4EE5335279DEFA57A72BF /* DatabaseManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManagerTests.swift; sourceTree = "<group>"; };
+		50BAD39A19751BCB3E8251BA /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		5E4D1A62FD5CB56CE9768BC6 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		6A1D44AA728FD1B860453681 /* ReviewingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewingView.swift; sourceTree = "<group>"; };
+		6BF59495461B1E1C728377EB /* AudioPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
+		74900502C2069088EAF7E361 /* RecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingView.swift; sourceTree = "<group>"; };
+		8089528154527CD6E30B16BF /* MeetingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingListView.swift; sourceTree = "<group>"; };
+		88BCE9A6467E7D0DDE679573 /* NewMeetingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMeetingSheet.swift; sourceTree = "<group>"; };
+		9746A8B0D288B51BBD828F41 /* MttoneApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MttoneApp.swift; sourceTree = "<group>"; };
+		A6A8D65D374BDD853E7E880E /* WhisperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperService.swift; sourceTree = "<group>"; };
+		A907FBA119F12ECAD0441546 /* MeetingListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingListViewModel.swift; sourceTree = "<group>"; };
+		B844239906D4685454BA0155 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		C91D8D437AC63F368DE0945D /* Mttone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Mttone.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5D88638556D79E746AEBE1C /* DatabaseManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseManager.swift; sourceTree = "<group>"; };
+		E67778AF159EAD1ACD8165A7 /* MttoneTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MttoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5F6E1C1D2FB7424A4A941BDD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3ADC53B688960A6B8F2E1192 /* WhisperKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		05AE550A41036629B7C8BBC1 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				6BF59495461B1E1C728377EB /* AudioPlayer.swift */,
+				B844239906D4685454BA0155 /* AudioRecorder.swift */,
+				E5D88638556D79E746AEBE1C /* DatabaseManager.swift */,
+				2A293A12B84005EC11E00228 /* DiarizationService.swift */,
+				A6A8D65D374BDD853E7E880E /* WhisperService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		26B7E01EF5610457DCB5B77B /* MttoneTests */ = {
+			isa = PBXGroup;
+			children = (
+				41A4EE5335279DEFA57A72BF /* DatabaseManagerTests.swift */,
+			);
+			path = MttoneTests;
+			sourceTree = "<group>";
+		};
+		6E6CFBCAC815C2DEA8C92330 /* Mttone */ = {
+			isa = PBXGroup;
+			children = (
+				3D054F21A9B88FEBCE7C5CF1 /* Info.plist */,
+				1631C06F256BB0DFC8D8ABC1 /* Mttone.entitlements */,
+				9746A8B0D288B51BBD828F41 /* MttoneApp.swift */,
+				8CD90FD0CF38811BF022E1DB /* Models */,
+				05AE550A41036629B7C8BBC1 /* Services */,
+				BA128C0E85F27C5C1B76C993 /* ViewModels */,
+				89CC3217FB1EEAE8EA922E99 /* Views */,
+			);
+			path = Mttone;
+			sourceTree = "<group>";
+		};
+		89CC3217FB1EEAE8EA922E99 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				5E4D1A62FD5CB56CE9768BC6 /* ContentView.swift */,
+				8089528154527CD6E30B16BF /* MeetingListView.swift */,
+				88BCE9A6467E7D0DDE679573 /* NewMeetingSheet.swift */,
+				74900502C2069088EAF7E361 /* RecordingView.swift */,
+				6A1D44AA728FD1B860453681 /* ReviewingView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		8CD90FD0CF38811BF022E1DB /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				50BAD39A19751BCB3E8251BA /* Models.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		94613C3FE81027D7CD0D3976 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C91D8D437AC63F368DE0945D /* Mttone.app */,
+				E67778AF159EAD1ACD8165A7 /* MttoneTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BA128C0E85F27C5C1B76C993 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				A907FBA119F12ECAD0441546 /* MeetingListViewModel.swift */,
+				08BC9C9EF9500B7DB27B3CB1 /* RecordingViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		C0BA185D862BDC28ACA6FA48 = {
+			isa = PBXGroup;
+			children = (
+				6E6CFBCAC815C2DEA8C92330 /* Mttone */,
+				26B7E01EF5610457DCB5B77B /* MttoneTests */,
+				94613C3FE81027D7CD0D3976 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		80BE89D9C9B62B0A283BAB7F /* Mttone */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6D2BE991CACBB36AB95E6B42 /* Build configuration list for PBXNativeTarget "Mttone" */;
+			buildPhases = (
+				08A87D373D4B21EC82A364D1 /* Sources */,
+				5F6E1C1D2FB7424A4A941BDD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Mttone;
+			packageProductDependencies = (
+				3BB7701F1C2C24C48A2CEFEE /* WhisperKit */,
+			);
+			productName = Mttone;
+			productReference = C91D8D437AC63F368DE0945D /* Mttone.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EB47F47B202F9257F3823B2E /* MttoneTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8ECBDFB59B47D9FA4BF8F41F /* Build configuration list for PBXNativeTarget "MttoneTests" */;
+			buildPhases = (
+				A45F21E22E9C994CDCEE58E3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CAAC8CF277BDC64EB406BBE5 /* PBXTargetDependency */,
+			);
+			name = MttoneTests;
+			packageProductDependencies = (
+			);
+			productName = MttoneTests;
+			productReference = E67778AF159EAD1ACD8165A7 /* MttoneTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		33F304D30060C94873131D06 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					80BE89D9C9B62B0A283BAB7F = {
+						DevelopmentTeam = "";
+					};
+					EB47F47B202F9257F3823B2E = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = 230503603400AFF57E84B884 /* Build configuration list for PBXProject "Mttone" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = C0BA185D862BDC28ACA6FA48;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				13898A24D873285C19FC5FB7 /* XCRemoteSwiftPackageReference "WhisperKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 94613C3FE81027D7CD0D3976 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				80BE89D9C9B62B0A283BAB7F /* Mttone */,
+				EB47F47B202F9257F3823B2E /* MttoneTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		08A87D373D4B21EC82A364D1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				29B59C00C8DD18157EC2C8A3 /* AudioPlayer.swift in Sources */,
+				F731CD0356F6509D303B047F /* AudioRecorder.swift in Sources */,
+				135FCA799A648AC981076DFF /* ContentView.swift in Sources */,
+				370421ADC1D49DA6F227C67C /* DatabaseManager.swift in Sources */,
+				DCC2351375A1793F976BD6D5 /* DiarizationService.swift in Sources */,
+				6811748F03BD5E3AACC4B70F /* MeetingListView.swift in Sources */,
+				5EA3DA8DDB5C39287DD52013 /* MeetingListViewModel.swift in Sources */,
+				CEED15D15D302FBB549DA7C1 /* Models.swift in Sources */,
+				EB0A5E29E4BE7F650E5E197D /* MttoneApp.swift in Sources */,
+				8FA743828F2592C216A0B4C7 /* NewMeetingSheet.swift in Sources */,
+				C0D96642A3D2D2501FA6FFF7 /* RecordingView.swift in Sources */,
+				9FC1A6D7628C0BC487C328A0 /* RecordingViewModel.swift in Sources */,
+				B5C218234E38099876BF0951 /* ReviewingView.swift in Sources */,
+				B2B5F43C9107E8D53DDA6DDC /* WhisperService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A45F21E22E9C994CDCEE58E3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3776B0181D3B2C69BF6BED04 /* DatabaseManagerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CAAC8CF277BDC64EB406BBE5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 80BE89D9C9B62B0A283BAB7F /* Mttone */;
+			targetProxy = BE9D72CE48D0C1BA88C6B2B1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1DFB110D4A451CE75703F190 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.eastlakestudio.mttone.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mttone.app/Mttone";
+			};
+			name = Release;
+		};
+		57E1C09FF51CCD4A7805B258 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Mttone/Mttone.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Mttone/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.eastlakestudio.mttone;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		60ADD648511222B175D78CA9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		71585BB34812BEDF278B7F83 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Mttone/Mttone.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Mttone/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.eastlakestudio.mttone;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9C9EE5202215DFB96AFC0F92 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.eastlakestudio.mttone.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mttone.app/Mttone";
+			};
+			name = Debug;
+		};
+		EBE4D07FC2D8EF618A6B8D7D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		230503603400AFF57E84B884 /* Build configuration list for PBXProject "Mttone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EBE4D07FC2D8EF618A6B8D7D /* Debug */,
+				60ADD648511222B175D78CA9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6D2BE991CACBB36AB95E6B42 /* Build configuration list for PBXNativeTarget "Mttone" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				57E1C09FF51CCD4A7805B258 /* Debug */,
+				71585BB34812BEDF278B7F83 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8ECBDFB59B47D9FA4BF8F41F /* Build configuration list for PBXNativeTarget "MttoneTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9C9EE5202215DFB96AFC0F92 /* Debug */,
+				1DFB110D4A451CE75703F190 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		13898A24D873285C19FC5FB7 /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/WhisperKit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3BB7701F1C2C24C48A2CEFEE /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 13898A24D873285C19FC5FB7 /* XCRemoteSwiftPackageReference "WhisperKit" */;
+			productName = WhisperKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 33F304D30060C94873131D06 /* Project object */;
+}
