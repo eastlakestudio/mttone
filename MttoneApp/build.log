@@ -1,0 +1,158 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build -project Mttone.xcodeproj -scheme Mttone -destination platform=macOS,arch=arm64 CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = -
+    CODE_SIGNING_ALLOWED = YES
+    CODE_SIGNING_REQUIRED = NO
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  Jinja: https://github.com/huggingface/swift-jinja.git @ 2.3.6
+  FluidAudio: https://github.com/FluidInference/FluidAudio.git @ main (9c20d9b)
+  swift-asn1: https://github.com/apple/swift-asn1.git @ 1.7.1
+  swift-argument-parser: https://github.com/apple/swift-argument-parser.git @ 1.8.2
+  yyjson: https://github.com/ibireme/yyjson.git @ 0.12.0
+  swift-crypto: https://github.com/apple/swift-crypto.git @ 4.5.0
+  swift-collections: https://github.com/apple/swift-collections.git @ 1.6.0
+  whisperkit: https://github.com/argmaxinc/WhisperKit.git @ 0.18.0
+  swift-transformers: https://github.com/huggingface/swift-transformers.git @ 1.1.9
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00008122-001E20A81ADA001C, name:My Mac }
+{ platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:00008122-001E20A81ADA001C, name:My Mac }
+note: Using codesigning identity override: -
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (23 targets)
+    Target 'Mttone' in project 'Mttone'
+        ➜ Explicit dependency on target 'WhisperKit' in project 'whisperkit'
+        ➜ Explicit dependency on target 'FluidAudio' in project 'FluidAudio'
+    Target 'FluidAudio' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'FluidAudio' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'FastClusterWrapper' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'MachTaskSelfWrapper' in project 'FluidAudio'
+    Target 'FluidAudio' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'FastClusterWrapper' in project 'FluidAudio'
+        ➜ Explicit dependency on target 'MachTaskSelfWrapper' in project 'FluidAudio'
+    Target 'MachTaskSelfWrapper' in project 'FluidAudio' (no dependencies)
+    Target 'FastClusterWrapper' in project 'FluidAudio' (no dependencies)
+    Target 'WhisperKit' in project 'whisperkit'
+        ➜ Explicit dependency on target 'WhisperKit' in project 'whisperkit'
+        ➜ Explicit dependency on target 'ArgmaxCore' in project 'whisperkit'
+        ➜ Explicit dependency on target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Tokenizers' in project 'swift-transformers'
+    Target 'WhisperKit' in project 'whisperkit'
+        ➜ Explicit dependency on target 'ArgmaxCore' in project 'whisperkit'
+        ➜ Explicit dependency on target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Tokenizers' in project 'swift-transformers'
+    Target 'Tokenizers' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Tokenizers' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'yyjson' in project 'yyjson'
+    Target 'Tokenizers' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'yyjson' in project 'yyjson'
+    Target 'ArgmaxCore' in project 'whisperkit'
+        ➜ Explicit dependency on target 'Hub' in project 'swift-transformers'
+    Target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'swift-transformers_Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'yyjson' in project 'yyjson'
+    Target 'Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'swift-transformers_Hub' in project 'swift-transformers'
+        ➜ Explicit dependency on target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'yyjson' in project 'yyjson'
+    Target 'yyjson' in project 'yyjson'
+        ➜ Explicit dependency on target 'yyjson' in project 'yyjson'
+    Target 'yyjson' in project 'yyjson' (no dependencies)
+    Target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'swift-crypto_Crypto' in project 'swift-crypto'
+    Target 'Crypto' in project 'swift-crypto'
+        ➜ Explicit dependency on target 'swift-crypto_Crypto' in project 'swift-crypto'
+    Target 'swift-crypto_Crypto' in project 'swift-crypto' (no dependencies)
+    Target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+    Target 'Jinja' in project 'Jinja'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+    Target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'InternalCollectionsUtilities' in project 'swift-collections'
+    Target 'OrderedCollections' in project 'swift-collections'
+        ➜ Explicit dependency on target 'InternalCollectionsUtilities' in project 'swift-collections'
+    Target 'InternalCollectionsUtilities' in project 'swift-collections' (no dependencies)
+    Target 'swift-transformers_Hub' in project 'swift-transformers' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ReadFileContents /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/share/docc/features.json
+
+Build description signature: 8f1a4d979ef08752b55f1b9f86aac169
+Build description path: /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Intermediates.noindex/XCBuildData/8f1a4d979ef08752b55f1b9f86aac169.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk /Users/minghualiu/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.5-25F70-e082c4a02f00227109f4ed75e425c832.sdkstatcache
+    cd /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp/Mttone.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -o /Users/minghualiu/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.5-25F70-e082c4a02f00227109f4ed75e425c832.sdkstatcache
+
+ProcessInfoPlistFile /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-transformers_Hub.bundle/Contents/Info.plist /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Intermediates.noindex/swift-transformers.build/Debug/swift-transformers_Hub.build/empty-swift-transformers_Hub.plist (in target 'swift-transformers_Hub' from project 'swift-transformers')
+    cd /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/SourcePackages/checkouts/swift-transformers
+    builtin-infoPlistUtility /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Intermediates.noindex/swift-transformers.build/Debug/swift-transformers_Hub.build/empty-swift-transformers_Hub.plist -producttype com.apple.product-type.bundle -expandbuildsettings -platform macosx -o /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-transformers_Hub.bundle/Contents/Info.plist
+
+ProcessInfoPlistFile /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-crypto_Crypto.bundle/Contents/Info.plist /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Intermediates.noindex/swift-crypto.build/Debug/swift-crypto_Crypto.build/empty-swift-crypto_Crypto.plist (in target 'swift-crypto_Crypto' from project 'swift-crypto')
+    cd /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/SourcePackages/checkouts/swift-crypto
+    builtin-infoPlistUtility /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Intermediates.noindex/swift-crypto.build/Debug/swift-crypto_Crypto.build/empty-swift-crypto_Crypto.plist -producttype com.apple.product-type.bundle -expandbuildsettings -platform macosx -o /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-crypto_Crypto.bundle/Contents/Info.plist
+
+Copy /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Resources/swift-crypto_Crypto.bundle /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-crypto_Crypto.bundle (in target 'Mttone' from project 'Mttone')
+    cd /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-crypto_Crypto.bundle /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Resources
+
+Copy /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Resources/swift-transformers_Hub.bundle /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-transformers_Hub.bundle (in target 'Mttone' from project 'Mttone')
+    cd /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/swift-transformers_Hub.bundle /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Resources
+
+ProcessInfoPlistFile /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Info.plist /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp/Mttone/Info.plist (in target 'Mttone' from project 'Mttone')
+    cd /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp
+    builtin-infoPlistUtility /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp/Mttone/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/PkgInfo -expandbuildsettings -platform macosx -scanforprivacyfile /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Resources/swift-crypto_Crypto.bundle -scanforprivacyfile /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Resources/swift-transformers_Hub.bundle -o /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Info.plist
+
+CopySwiftLibs /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app (in target 'Mttone' from project 'Mttone')
+    cd /Users/minghualiu/personal/EastlakeStudio/mttone/MttoneApp
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/MacOS/Mttone.debug.dylib --scan-folder /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Frameworks --scan-folder /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/PlugIns --scan-folder /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Library/SystemExtensions --scan-folder /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Extensions --platform macosx --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Products/Debug/Mttone.app/Contents/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/minghualiu/Library/Developer/Xcode/DerivedData/Mttone-aegmwukarkmxatavwshpemcklyeh/Build/Intermediates.noindex/Mttone.build/Debug/Mttone.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+** BUILD SUCCEEDED **
+
