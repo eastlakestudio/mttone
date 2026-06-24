@@ -15,7 +15,11 @@ struct RecordingView: View {
             // 底部控制栏
             controlBar
         }
-        .background(Color(.windowBackgroundColor))
+        #if os(macOS)
+        .background(Color(nsColor: .windowBackgroundColor))
+        #else
+        .background(Color(uiColor: .systemGroupedBackground))
+        #endif
     }
 
     // MARK: - 录音状态栏

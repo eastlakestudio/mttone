@@ -26,39 +26,56 @@ struct ReviewingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(viewModel.transcriptSegments.filter { $0.isFinal }) { segment in
-                                TranscriptBubble(
-                                    segment: segment,
-                                    isActive: segment.id == activeSegmentId,
-                                    onTextChange: { newText in
-                                        viewModel.updateSegmentText(id: segment.id, newText: newText)
-                                    },
-                                    onSpeakerChange: { newSpeaker in
-                                        viewModel.updateSpeakerLabel(id: segment.id, newLabel: newSpeaker)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 8) {
+                                ForEach(viewModel.transcriptSegments.filter { $0.isFinal }) { segment in
+                                    TranscriptBubble(
+                                        segment: segment,
+                                        isActive: segment.id == activeSegmentId,
+                                        onTextChange: { newText in
+                                            viewModel.updateSegmentText(id: segment.id, newText: newText)
+                                        },
+                                        onSpeakerChange: { newSpeaker in
+                                            viewModel.updateSpeakerLabel(id: segment.id, newLabel: newSpeaker)
+                                        }
+                                    )
+                                    .id(segment.id)
+                                    .onTapGesture {
+                                        playSegment(segment)
                                     }
-                                )
-                                .id(segment.id)
+                                    // 鼠标悬浮时显示为手指指针（提示可点击）
+                                    #if os(macOS)
+                                    .onHover { isHovered in
+                                        if isHovered {
+                                            NSCursor.pointingHand.push()
+                                        } else {
+                                            NSCursor.pop()
+                                        }
+                                    }
+                                    #endif
+                                }
                             }
+                            .padding()
                         }
-                        .padding()
-                    }
-                    .onChange(of: viewModel.audioPlayer.currentTime) { _, newTime in
-                        // 寻找当前播放时间所在的片段
-                        if let activeSegment = viewModel.transcriptSegments.last(where: { $0.startTime <= newTime && $0.endTime >= newTime }) {
-                            if activeSegment.id != activeSegmentId {
-                                activeSegmentId = activeSegment.id
-                                withAnimation {
-                                    proxy.scrollTo(activeSegment.id, anchor: .center)
+                        .onChange(of: viewModel.audioPlayer.currentTime) { _, newTime in
+                            // 寻找当前播放时间所在的片段
+                            if let activeSegment = viewModel.transcriptSegments.last(where: { $0.startTime <= newTime && $0.endTime >= newTime }) {
+                                if activeSegment.id != activeSegmentId {
+                                    activeSegmentId = activeSegment.id
+                                    withAnimation {
+                                        proxy.scrollTo(activeSegment.id, anchor: .center)
+                                    }
                                 }
                             }
                         }
                     }
-                }
                 } // End else
             }
-            .background(Color(.windowBackgroundColor))
+            #if os(macOS)
+            .background(Color(nsColor: .windowBackgroundColor))
+            #else
+            .background(Color(uiColor: .systemGroupedBackground))
+            #endif
             .navigationTitle("会议回顾")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -137,7 +154,7 @@ struct ReviewingView: View {
                         if let meeting = viewModel.currentMeeting {
                             // 动态从 Documents 文件夹计算当前会议的绝对物理路径，避开硬编码/已过期的沙盒哈希
                             let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                            let url = docDir.appendingPathComponent("audio_\(meeting.id).m4a")
+                            let url = docDir.appendingPathComponent("audio_\(meeting.id).wav")
                             
                             // 无论是否播放过，如果当前时间等于总时长或者还没实例化，都进行全新播放
                             if viewModel.audioPlayer.currentTime >= viewModel.audioPlayer.duration - 0.1 || !viewModel.audioPlayer.hasPlayer {
@@ -194,5 +211,25 @@ struct ReviewingView: View {
         let mins = Int(time) / 60
         let secs = Int(time) % 60
         return String(format: "%02d:%02d", mins, secs)
+    }
+
+    private func playSegment(_ segment: TranscriptSegment) {
+        if let meeting = viewModel.currentMeeting {
+            let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let url = docDir.appendingPathComponent("audio_\(meeting.id).wav")
+            
+            // 如果还没初始化过播放器，则先初始化
+            if !viewModel.audioPlayer.hasPlayer {
+                viewModel.audioPlayer.startPlaying(url: url)
+            }
+        }
+        
+        // 进度跳转
+        viewModel.audioPlayer.seek(to: segment.startTime)
+        
+        // 如果当前未播放，则自动播放
+        if !viewModel.audioPlayer.isPlaying {
+            viewModel.audioPlayer.resume()
+        }
     }
 }

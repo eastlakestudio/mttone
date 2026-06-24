@@ -5,6 +5,8 @@ struct MeetingListView: View {
     @Bindable var recordingVM: RecordingViewModel
     @Environment(DatabaseManager.self) private var databaseManager
     @State private var listVM: MeetingListViewModel?
+    @State private var showPermissionAlert = false
+    @State private var permissionAlertMessage = ""
 
     var body: some View {
         NavigationStack {
@@ -24,7 +26,11 @@ struct MeetingListView: View {
                         .frame(maxHeight: .infinity)
                 }
             }
-            .background(Color(.windowBackgroundColor))
+            #if os(macOS)
+            .background(Color(nsColor: .windowBackgroundColor))
+            #else
+            .background(Color(uiColor: .systemGroupedBackground))
+            #endif
             .navigationTitle("Mttone")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
@@ -32,7 +38,17 @@ struct MeetingListView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        recordingVM.onTapStartRecording()
+                        Task {
+                            let granted = await recordingVM.audioRecorder.requestPermissions()
+                            await MainActor.run {
+                                if granted {
+                                    recordingVM.onTapStartRecording()
+                                } else {
+                                    permissionAlertMessage = recordingVM.audioRecorder.errorMessage ?? "麦克风或语音识别权限被拒绝"
+                                    showPermissionAlert = true
+                                }
+                            }
+                        }
                     } label: {
                         Label("开始新录音", systemImage: "mic.fill")
                             .font(.headline)
@@ -43,6 +59,11 @@ struct MeetingListView: View {
             }
             .sheet(isPresented: $recordingVM.showNewMeetingSheet) {
                 NewMeetingSheet(viewModel: recordingVM)
+            }
+            .alert("权限不足", isPresented: $showPermissionAlert) {
+                Button("确定", role: .cancel) { }
+            } message: {
+                Text("\(permissionAlertMessage)\n\n请前往「系统设置 - 隐私与安全性 - 麦克风/语音识别」中开启权限。如果是由于重签名导致卡死，您可能需要重启电脑或在终端重置 TCC 权限。")
             }
             .onAppear {
                 if listVM == nil {
@@ -99,7 +120,7 @@ struct MeetingListView: View {
                 recordingVM.currentMeeting = meeting
                 // 根据会议的音频路径，填充回放路径
                 let finalPath = meeting.audioPath.isEmpty 
-                    ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("audio_\(meeting.id).m4a").path 
+                    ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("audio_\(meeting.id).wav").path 
                     : meeting.audioPath
                 recordingVM.currentMeeting?.audioPath = finalPath
                 

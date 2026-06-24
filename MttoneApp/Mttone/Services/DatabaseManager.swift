@@ -288,8 +288,6 @@ final class DatabaseManager {
             let cleaned = columnOptionalText(stmt, index: 7)
             let path = columnOptionalText(stmt, index: 8)
             let isKey = sqlite3_column_int(stmt, 9) != 0
-            let createdStr = columnText(stmt, index: 10)
-            let createdAt = dateFormatter.date(from: createdStr) ?? Date()
             
             clips.append(SpeechClip(
                 id: id,

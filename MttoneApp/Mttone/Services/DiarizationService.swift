@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import FluidAudio
 
 struct DiarizedSegment {
     let speakerId: String
@@ -10,24 +11,45 @@ struct DiarizedSegment {
 actor DiarizationService {
     static let shared = DiarizationService()
     
-    /// 技术可行性打样：模拟或调用基础算法提取声纹特征并进行聚类
-    /// 实际量产时，此处将调用 Pyannote-CoreML 模型进行推理
+    private var manager: OfflineDiarizerManager?
+    
+    private func getManager() async throws -> OfflineDiarizerManager {
+        if let manager = manager {
+            return manager
+        }
+        print("[DiarizationService] 初始化 FluidAudio 离线分离器并检查模型...")
+        
+        // 默认 clusteringThreshold 是 0.6。
+        // 如果把两个人的声音合并了，说明阈值太宽松了。降低阈值（如 0.45）可以更严格地把不同特征判定为不同的人。
+        let config = OfflineDiarizerConfig(clusteringThreshold: 0.45)
+        let newManager = OfflineDiarizerManager(config: config)
+        try await newManager.prepareModels()
+        self.manager = newManager
+        return newManager
+    }
+
+    /// 使用 FluidAudio 本地模型提取声纹特征并进行聚类
     func diarize(audioURL: URL) async throws -> [DiarizedSegment] {
-        print("[DiarizationService] 开始端侧声纹分离技术验证...")
+        print("[DiarizationService] 开始端侧声纹分离...")
         
-        // 此处为 Spike 阶段的技术模拟。我们使用延时模拟端侧大型 CoreML 模型的推理耗时
-        // 并在音频的不同时间段，模拟分离出不同的 Speaker，证明流水线的上下游完全打通
-        try await Task.sleep(nanoseconds: 2_000_000_000) // 模拟推理时间
+        let manager = try await getManager()
         
-        // 假设音频时长为 30 秒，我们随机返回两段不同说话人的分离结果
-        // 这足以证明聚类算法对齐逻辑在内存中可以完美运转
-        let mockSegments: [DiarizedSegment] = [
-            DiarizedSegment(speakerId: "Speaker_A", startTime: 0.0, endTime: 4.5),
-            DiarizedSegment(speakerId: "Speaker_B", startTime: 4.6, endTime: 12.0),
-            DiarizedSegment(speakerId: "Speaker_A", startTime: 12.5, endTime: 30.0)
-        ]
+        print("[DiarizationService] 正在重采样音频文件...")
+        // FluidAudio 需要特定的采样率
+        let samples = try AudioConverter().resampleAudioFile(path: audioURL.path)
         
-        print("[DiarizationService] 声纹聚类推理完毕，共分离出 \(mockSegments.count) 个发音区间")
-        return mockSegments
+        print("[DiarizationService] 正在执行模型推理...")
+        let result = try await manager.process(audio: samples)
+        
+        let segments = result.segments.map { segment in
+            DiarizedSegment(
+                speakerId: "Speaker_\(segment.speakerId)", 
+                startTime: Double(segment.startTimeSeconds), 
+                endTime: Double(segment.endTimeSeconds)
+            )
+        }
+        
+        print("[DiarizationService] 声纹聚类推理完毕，共分离出 \(segments.count) 个发音区间")
+        return segments
     }
 }

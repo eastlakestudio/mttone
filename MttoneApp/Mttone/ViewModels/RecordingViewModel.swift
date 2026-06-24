@@ -30,7 +30,7 @@ final class RecordingViewModel {
     // MARK: - 依赖
 
     var audioPlayer = AudioPlayer() // 回放播放器
-    private let audioRecorder: AudioRecorder
+    let audioRecorder: AudioRecorder
     private let databaseManager: DatabaseManager
     
     // 离线转写状态
@@ -88,7 +88,7 @@ final class RecordingViewModel {
 
         // 3. 启动录音，传入上下文高频词汇（如标题、地点、参会人）
         let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let audioPath = audioDir.appendingPathComponent("audio_\(meeting.id).m4a")
+        let audioPath = audioDir.appendingPathComponent("audio_\(meeting.id).wav")
 
         var contextualWords: [String] = []
         if !formTitle.isEmpty { contextualWords.append(formTitle) }
@@ -96,6 +96,8 @@ final class RecordingViewModel {
         if !formAttendees.isEmpty { contextualWords.append(contentsOf: formAttendees.split(separator: " ").map(String.init)) }
 
         do {
+            // 提前加载 Whisper 模型，以免在录音循环中报错“模型尚未加载完成”
+            try await WhisperService.shared.initialize()
             try audioRecorder.startRecording(meetingId: meeting.id, savePath: audioPath, contextualStrings: contextualWords)
         } catch {
             errorAlert = "启动录音失败: \(error.localizedDescription)"
@@ -130,7 +132,7 @@ final class RecordingViewModel {
         // 更新数据库状态并补充音频路径
         if let meeting = currentMeeting {
             let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let audioPath = audioDir.appendingPathComponent("audio_\(meeting.id).m4a").path
+            let audioPath = audioDir.appendingPathComponent("audio_\(meeting.id).wav").path
             
             // 更新数据库
             try? databaseManager.updateMeetingStatus(
@@ -165,7 +167,7 @@ final class RecordingViewModel {
     private func runOfflineTranscription() {
         guard let meeting = currentMeeting else { return }
         let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let audioURL = audioDir.appendingPathComponent("audio_\(meeting.id).m4a")
+        let audioURL = audioDir.appendingPathComponent("audio_\(meeting.id).wav")
 
         isTranscribingOffline = true
         Task {
@@ -194,6 +196,7 @@ final class RecordingViewModel {
             } catch {
                 print("[RecordingViewModel] 离线大模型转写失败: \(error)")
                 await MainActor.run {
+                    self.errorAlert = "离线大模型转写/分离失败:\n\(error.localizedDescription)"
                     // 如果大模型转写失败，保留原生识别的片段并持久化
                     self.saveSegmentsToDatabase(meetingId: meeting.id)
                     self.isTranscribingOffline = false
@@ -310,8 +313,10 @@ final class RecordingViewModel {
         
         for i in 0..<results.count {
             let tSegment = results[i]
-            var bestSpeaker = "Speaker_1"
+            var bestSpeaker: String? = nil
             var maxOverlap: Double = 0.0
+            var nearestDistance: Double = .infinity
+            var nearestSpeaker: String? = nil
             
             for dSegment in diarization {
                 // 计算两个时间区间的重叠面积 (Intersection over Union - 核心思路)
@@ -325,11 +330,26 @@ final class RecordingViewModel {
                         bestSpeaker = dSegment.speakerId
                     }
                 }
+                
+                // 计算距离，用于 fallback（如果没有任何重叠，则找最近的说话人）
+                let distance: Double
+                if tSegment.endTime <= dSegment.startTime {
+                    distance = dSegment.startTime - tSegment.endTime
+                } else if tSegment.startTime >= dSegment.endTime {
+                    distance = tSegment.startTime - dSegment.endTime
+                } else {
+                    distance = 0
+                }
+                
+                if distance < nearestDistance {
+                    nearestDistance = distance
+                    nearestSpeaker = dSegment.speakerId
+                }
             }
             
-            // 如果存在重叠，就将分离出的最佳说话人赋予文字气泡
-            if maxOverlap > 0 {
-                results[i].speakerLabel = bestSpeaker
+            // 优先使用重叠面积最大的说话人，否则 fallback 到时间上最接近的说话人
+            if let speaker = bestSpeaker ?? nearestSpeaker {
+                results[i].speakerLabel = speaker
             }
         }
         
