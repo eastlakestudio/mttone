@@ -35,59 +35,73 @@ struct NewMeetingSheet: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 16) {
-                // 1. 会议主题 (左对齐至右列)
-                HStack(spacing: 16) {
+                // 1. 会议主题 (上下布局)
+                VStack(alignment: .leading, spacing: 6) {
                     Text("会议主题")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .frame(width: 160, alignment: .leading)
                     
-                    TextField("输入会议主题", text: $viewModel.formTitle)
-                        .textFieldStyle(.plain)
-                        .padding(10)
-                        .background(.quaternary.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    HStack(spacing: 16) {
+                        Spacer()
+                            .frame(width: 160)
+                        
+                        TextField("输入会议主题", text: $viewModel.formTitle)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(.quaternary.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                 }
 
                 // 2. 开始时间 与 会议地点 (共用一行)
-                HStack(spacing: 16) {
-                    // 开始时间选择按钮 (左侧对齐)
-                    Button {
-                        showDatePickerPopover = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "calendar")
-                                .foregroundStyle(.purple)
-                            Text(formattedFormDate)
-                                .font(.subheadline)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("开始时间")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Button {
+                            showDatePickerPopover = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "calendar")
+                                    .foregroundStyle(.purple)
+                                Text(formattedFormDate)
+                                    .font(.subheadline)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(.quaternary.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(.quaternary.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .frame(width: 160)
-                    .popover(isPresented: $showDatePickerPopover) {
-                        VStack {
-                            DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
-                                .datePickerStyle(.graphical)
-                                .labelsHidden()
+                        .buttonStyle(.plain)
+                        .frame(width: 160)
+                        .popover(isPresented: $showDatePickerPopover) {
+                            VStack {
+                                DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
+                                    .datePickerStyle(.graphical)
+                                    .labelsHidden()
+                            }
+                            .padding()
+                            .frame(width: 280, height: 320)
                         }
-                        .padding()
-                        .frame(width: 280, height: 320)
                     }
 
-                    // 会议地点输入框 (右侧对齐)
-                    TextField("输入地点", text: $viewModel.formLocation)
-                        .textFieldStyle(.plain)
-                        .padding(10)
-                        .background(.quaternary.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .onChange(of: viewModel.formLocation) { _, _ in
-                            showLocationSuggestions = !viewModel.formLocation.isEmpty
-                        }
-                        .onSubmit { showLocationSuggestions = false }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("会议地点")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        TextField("输入地点", text: $viewModel.formLocation)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(.quaternary.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .onChange(of: viewModel.formLocation) { _, _ in
+                                showLocationSuggestions = !viewModel.formLocation.isEmpty
+                            }
+                            .onSubmit { showLocationSuggestions = false }
+                    }
                 }
 
                 if showLocationSuggestions && !viewModel.formLocation.isEmpty {
@@ -260,6 +274,8 @@ struct NewMeetingSheet: View {
                                   .help("选择音频文件")
                               }
                               .transition(.opacity)
+                          } else {
+                              Spacer()
                           }
                       }
                       .frame(height: 32)
@@ -365,8 +381,7 @@ struct NewMeetingSheet: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM-dd HH:mm"
         let start = formatter.string(from: meeting.createdAt)
-        let end = formatter.string(from: meeting.createdAt.addingTimeInterval(Double(meeting.duration)))
-        return "\(meeting.title) (\(start)-\(end))"
+        return "\(meeting.title) (\(start))"
     }
 
     private func selectAudioFile() {
