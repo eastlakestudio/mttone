@@ -205,6 +205,7 @@ struct NewMeetingSheet: View {
                     
                     HStack(spacing: 12) {
                         Button {
+                            print("[NewMeetingSheet] Live Recording Button clicked.")
                             viewModel.recordingMode = .liveRecording
                         } label: {
                             HStack {
@@ -222,6 +223,7 @@ struct NewMeetingSheet: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Capsule())
                         
                         Button {
                             print("[NewMeetingSheet] Audio File Button clicked.")
@@ -239,7 +241,7 @@ struct NewMeetingSheet: View {
                                 if !originalAudioFileName.isEmpty {
                                     Image(systemName: "pencil.circle.fill")
                                         .foregroundStyle(.secondary)
-                                }
+                                    }
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 8)
@@ -252,6 +254,7 @@ struct NewMeetingSheet: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .contentShape(Capsule())
                     }
                 }
 
