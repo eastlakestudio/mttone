@@ -10,6 +10,10 @@ struct NewMeetingSheet: View {
     @State private var attendeeText = ""
     @State private var attendees: [String] = []
     @State private var speakerSuggestions: [String] = []
+    @State private var isImporting = false
+    @State private var recentMeetings: [Meeting] = []
+    @State private var tempSelectedAudioURL: URL? = nil
+    @State private var originalAudioFileName: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,57 +28,68 @@ struct NewMeetingSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("会议主题")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("输入会议主题", text: $viewModel.formTitle)
-                            .textFieldStyle(.plain)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("会议主题")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("输入会议主题", text: $viewModel.formTitle)
+                                .textFieldStyle(.plain)
+                                .padding(10)
+                                .background(.quaternary.opacity(0.5))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("会议地点")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("输入地点", text: $viewModel.formLocation)
+                                .textFieldStyle(.plain)
+                                .padding(10)
+                                .background(.quaternary.opacity(0.5))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .onChange(of: viewModel.formLocation) { _, _ in
+                                    showLocationSuggestions = !viewModel.formLocation.isEmpty
+                                }
+                                .onSubmit { showLocationSuggestions = false }
+                        }
+                    }
+
+                    if showLocationSuggestions && !viewModel.formLocation.isEmpty {
+                        let filtered = locationSuggestions.filter {
+                            $0.lowercased().contains(viewModel.formLocation.lowercased())
+                        }
+                        if !filtered.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(filtered.prefix(8), id: \.self) { loc in
+                                        Button {
+                                            viewModel.formLocation = loc
+                                            showLocationSuggestions = false
+                                        } label: {
+                                            Text(loc)
+                                                .font(.caption)
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 4)
+                                                .background(.quaternary.opacity(0.5))
+                                                .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal, 2)
+                            }
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("会议地点")
+                        Text("会议时间")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("输入地点", text: $viewModel.formLocation)
-                            .textFieldStyle(.plain)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .onChange(of: viewModel.formLocation) { _, _ in
-                                showLocationSuggestions = !viewModel.formLocation.isEmpty
-                            }
-                            .onSubmit { showLocationSuggestions = false }
-
-                        if showLocationSuggestions && !viewModel.formLocation.isEmpty {
-                            let filtered = locationSuggestions.filter {
-                                $0.lowercased().contains(viewModel.formLocation.lowercased())
-                            }
-                            if !filtered.isEmpty {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 8) {
-                                        ForEach(filtered.prefix(8), id: \.self) { loc in
-                                            Button {
-                                                viewModel.formLocation = loc
-                                                showLocationSuggestions = false
-                                            } label: {
-                                                Text(loc)
-                                                    .font(.caption)
-                                                    .padding(.horizontal, 10)
-                                                    .padding(.vertical, 4)
-                                                    .background(.quaternary.opacity(0.5))
-                                                    .clipShape(Capsule())
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                    }
-                                    .padding(.horizontal, 2)
-                                }
-                            }
-                        }
+                        DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -150,50 +165,148 @@ struct NewMeetingSheet: View {
                         }
                     }
 
-                    Toggle("延续上一次会议", isOn: $viewModel.shouldExtendLastMeeting)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("音频来源")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("音频来源", selection: $viewModel.recordingMode) {
+                            Text("开始录音").tag(RecordingViewModel.RecordingMode.liveRecording)
+                            Text("导入文件").tag(RecordingViewModel.RecordingMode.importFile)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+
+                    if viewModel.recordingMode == .importFile {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("导入音频")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            HStack {
+                                if !originalAudioFileName.isEmpty {
+                                    Image(systemName: "waveform.circle.fill")
+                                        .foregroundStyle(.purple)
+                                    Text(originalAudioFileName)
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Button("重选") {
+                                        isImporting = true
+                                    }
+                                    .buttonStyle(.bordered)
+                                } else {
+                                    Button {
+                                        isImporting = true
+                                    } label: {
+                                        Label("选择音频文件", systemImage: "doc.badge.plus")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.purple)
+                                }
+                            }
+                            .padding(10)
+                            .background(.quaternary.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+
+                    Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
                         .font(.subheadline)
+
+                    if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
+                        HStack {
+                            Text("关联父会议")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Picker("", selection: $viewModel.selectedParentMeetingId) {
+                                ForEach(recentMeetings, id: \.id) { meeting in
+                                    Text(meeting.title).tag(String?.some(meeting.id))
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                        }
+                        .padding(.top, 4)
+                    }
                 }
                 .padding()
             }
 
             Divider()
 
-            VStack(spacing: 12) {
-                Picker("音频来源", selection: $viewModel.recordingMode) {
-                    Text("开始录音").tag(RecordingViewModel.RecordingMode.liveRecording)
-                    Text("导入文件").tag(RecordingViewModel.RecordingMode.importFile)
+            HStack(spacing: 12) {
+                Button("取消") {
+                    dismiss()
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
+                .keyboardShortcut(.cancelAction)
+                .controlSize(.large)
 
-                HStack(spacing: 12) {
-                    Button("取消") {
-                        dismiss()
-                    }
-                    .keyboardShortcut(.cancelAction)
-                    .controlSize(.large)
+                Spacer()
 
-                    Spacer()
-
-                    Button {
-                        if viewModel.recordingMode == .liveRecording {
-                            Task {
-                                await viewModel.startRecording()
-                            }
-                        } else {
-                            viewModel.shouldTriggerImport = true
-                            dismiss()
+                Button {
+                    if viewModel.recordingMode == .liveRecording {
+                        Task {
+                            await viewModel.startRecording()
                         }
-                    } label: {
-                        Label("开始", systemImage: "play.fill")
+                    } else {
+                        if let tempURL = tempSelectedAudioURL {
+                            Task {
+                                viewModel.formAttendees = attendees.joined(separator: " ")
+                                await viewModel.importAudioFile(
+                                    from: tempURL,
+                                    title: viewModel.formTitle.isEmpty ? nil : viewModel.formTitle,
+                                    location: viewModel.formLocation.isEmpty ? nil : viewModel.formLocation
+                                )
+                                try? FileManager.default.removeItem(at: tempURL)
+                                tempSelectedAudioURL = nil
+                                await MainActor.run {
+                                    dismiss()
+                                }
+                            }
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.purple)
+                } label: {
+                    Label("开始", systemImage: "play.fill")
                 }
-                .padding(.horizontal)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.purple)
+                .disabled(viewModel.recordingMode == .importFile && tempSelectedAudioURL == nil)
             }
+            .padding(.horizontal)
             .padding(.vertical, 12)
+        }
+        .onChange(of: viewModel.recordingMode) { _, newMode in
+            if newMode == .importFile {
+                isImporting = true
+            }
+        }
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: false
+        ) { result in
+            guard let url = try? result.get().first else { return }
+            let gained = url.startAccessingSecurityScopedResource()
+            defer {
+                if gained {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            
+            let tempDir = FileManager.default.temporaryDirectory
+            let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
+            try? FileManager.default.removeItem(at: tempURL)
+            do {
+                try FileManager.default.copyItem(at: url, to: tempURL)
+                tempSelectedAudioURL = tempURL
+                originalAudioFileName = url.lastPathComponent
+            } catch {
+                print("[NewMeetingSheet] Copy temp file failed: \(error)")
+            }
         }
         .frame(minWidth: 380, idealWidth: 420)
         .onAppear {
@@ -205,9 +318,16 @@ struct NewMeetingSheet: View {
                     .map(String.init)
                     .filter { !$0.isEmpty }
             }
+            recentMeetings = databaseManager.fetchAllMeetings()
+            if viewModel.selectedParentMeetingId == nil {
+                viewModel.selectedParentMeetingId = recentMeetings.first?.id
+            }
         }
         .onDisappear {
             viewModel.formAttendees = attendees.joined(separator: " ")
+            if let tempURL = tempSelectedAudioURL {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
         }
     }
 

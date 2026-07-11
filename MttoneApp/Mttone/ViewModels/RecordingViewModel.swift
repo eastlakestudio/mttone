@@ -20,6 +20,8 @@ final class RecordingViewModel {
     var formLocation = ""
     var formAttendees = ""
     var shouldExtendLastMeeting = false // 是否延续上一次会议的开关
+    var selectedParentMeetingId: String? = nil
+    var formCreatedAt = Date()
 
     enum RecordingMode {
         case liveRecording
@@ -27,7 +29,6 @@ final class RecordingViewModel {
     }
 
     var recordingMode: RecordingMode = .liveRecording
-    var shouldTriggerImport = false  // sheet 关闭后触发文件导入
     var showingMeetingEditor = false
 
     enum MeetingStatus {
@@ -76,17 +77,19 @@ final class RecordingViewModel {
             ? "会议记录_\(formattedDate)"
             : formTitle
 
-        // 如果勾选了延续上一次会议，则获取上一次会议的 ID
+        // 如果勾选了延续上一次会议，则获取选中的关联会议 ID
         var parentId: String? = nil
         if shouldExtendLastMeeting {
-            parentId = databaseManager.fetchLastMeetingId()
+            parentId = selectedParentMeetingId
         }
 
-        let meeting = Meeting.create(
+        var meeting = Meeting.create(
             title: title,
             location: formLocation.isEmpty ? nil : formLocation,
             parentMeetingId: parentId
         )
+        meeting.createdAt = formCreatedAt
+        meeting.updatedAt = formCreatedAt
 
         do {
             try databaseManager.createMeeting(meeting)
@@ -238,17 +241,22 @@ final class RecordingViewModel {
             options: .caseInsensitive
         )
 
+        var parentId: String? = nil
+        if shouldExtendLastMeeting {
+            parentId = selectedParentMeetingId
+        }
+
         let meeting = Meeting(
             id: meetingId,
-            parentMeetingId: nil,
+            parentMeetingId: parentId,
             title: meetingTitle,
             location: location ?? "外部导入",
             audioPath: destURL.path,
             duration: 0,
             status: .pendingDiarization,
             summary: nil,
-            createdAt: Date(),
-            updatedAt: Date()
+            createdAt: formCreatedAt,
+            updatedAt: formCreatedAt
         )
 
         do {
@@ -368,6 +376,8 @@ final class RecordingViewModel {
         formLocation = ""
         formAttendees = ""
         shouldExtendLastMeeting = false
+        selectedParentMeetingId = nil
+        formCreatedAt = Date()
         recordingMode = .liveRecording
     }
 

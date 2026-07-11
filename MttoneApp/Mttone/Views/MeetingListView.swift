@@ -10,7 +10,6 @@ struct MeetingListView: View {
     @State private var listVM: MeetingListViewModel?
     @State private var showPermissionAlert = false
     @State private var permissionAlertMessage = ""
-    @State private var isImporting = false
     @State private var showDeleteSheet = false
     @State private var deleteGroupMeetings: [Meeting] = []
     @State private var deleteGroupClipCounts: [String: Int] = [:]
@@ -56,12 +55,6 @@ struct MeetingListView: View {
             .sheet(isPresented: $recordingVM.showNewMeetingSheet) {
                 NewMeetingSheet(viewModel: recordingVM)
             }
-            .onChange(of: recordingVM.showNewMeetingSheet) { _, newValue in
-                if !newValue && recordingVM.shouldTriggerImport {
-                    recordingVM.shouldTriggerImport = false
-                    isImporting = true
-                }
-            }
             .sheet(isPresented: $showDeleteSheet) {
                 DeleteMeetingSheet(
                     meetings: deleteGroupMeetings,
@@ -91,26 +84,6 @@ struct MeetingListView: View {
             .onChange(of: recordingVM.meetingStatus) { _, newStatus in
                 if newStatus == .idle {
                     listVM?.loadMeetings()
-                }
-            }
-            .fileImporter(
-                isPresented: $isImporting,
-                allowedContentTypes: [.audio],
-                allowsMultipleSelection: false
-            ) { result in
-                guard let url = try? result.get().first else { return }
-                let gained = url.startAccessingSecurityScopedResource()
-                let title = recordingVM.formTitle
-                let location = recordingVM.formLocation
-                Task {
-                    await recordingVM.importAudioFile(
-                        from: url,
-                        title: title.isEmpty ? nil : title,
-                        location: location.isEmpty ? nil : location
-                    )
-                    if gained {
-                        url.stopAccessingSecurityScopedResource()
-                    }
                 }
             }
         }
@@ -219,13 +192,17 @@ struct MeetingRow: View {
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
+                    Label(formattedTimeRange, systemImage: "calendar")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     if let location = meeting.location {
                         Label(location, systemImage: "mappin")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(formattedDuration)
+                    Label(formattedDuration, systemImage: "clock")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -281,6 +258,23 @@ struct MeetingRow: View {
         }
     }
 
+    private var formattedTimeRange: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let start = formatter.string(from: meeting.createdAt)
+        let end = formatter.string(from: meeting.createdAt.addingTimeInterval(Double(meeting.duration)))
+        
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let dateStr = dayFormatter.string(from: meeting.createdAt)
+        
+        if meeting.duration > 0 {
+            return "\(dateStr) \(start)-\(end)"
+        } else {
+            return "\(dateStr) \(start) - ..."
+        }
+    }
+
     private var formattedDuration: String {
         let mins = meeting.duration / 60
         let secs = meeting.duration % 60
@@ -310,7 +304,7 @@ struct DeleteMeetingSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("以下关联会议将被删除（含录音文件、转写文本和说话人分离数据），此操作不可撤销。")
+                    Text("以下关联会议将被删除（含录音文件、转写文本和说话人分离数据），此操作不可撤销。在删除前，您可以点击录音文件右侧的导出按钮手动导出所需文件。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
