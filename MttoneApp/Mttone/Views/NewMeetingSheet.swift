@@ -224,12 +224,11 @@ struct NewMeetingSheet: View {
                         .buttonStyle(.plain)
                         
                         Button {
+                            print("[NewMeetingSheet] Audio File Button clicked.")
                             if viewModel.recordingMode != .importFile {
                                 viewModel.recordingMode = .importFile
-                                DispatchQueue.main.async {
-                                    isImporting = true
-                                }
                             } else {
+                                print("[NewMeetingSheet] Already in importFile mode, triggering isImporting = true")
                                 isImporting = true
                             }
                         } label: {
@@ -257,9 +256,11 @@ struct NewMeetingSheet: View {
                 }
 
                 // 5. 延续历史会议
-                HStack(spacing: 8) {
+                HStack {
                     Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
                         .font(.subheadline)
+
+                    Spacer()
 
                     if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
                         Picker("", selection: $viewModel.selectedParentMeetingId) {
@@ -269,7 +270,7 @@ struct NewMeetingSheet: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
-                        .frame(maxWidth: 180)
+                        .frame(width: 180)
                     }
                 }
             }
@@ -320,28 +321,46 @@ struct NewMeetingSheet: View {
             .padding(.vertical, 12)
         }
         .frame(minWidth: 440, idealWidth: 480)
+        .onChange(of: viewModel.recordingMode) { _, newMode in
+            print("[NewMeetingSheet] recordingMode changed to: \(newMode)")
+            if newMode == .importFile {
+                print("[NewMeetingSheet] Triggering isImporting = true via onChange")
+                isImporting = true
+            }
+        }
         .fileImporter(
             isPresented: $isImporting,
             allowedContentTypes: [.audio],
             allowsMultipleSelection: false
         ) { result in
-            guard let url = try? result.get().first else { return }
-            let gained = url.startAccessingSecurityScopedResource()
-            defer {
-                if gained {
-                    url.stopAccessingSecurityScopedResource()
+            print("[NewMeetingSheet] fileImporter callback triggered. Result: \(result)")
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else {
+                    print("[NewMeetingSheet] No URL found in success result.")
+                    return
                 }
-            }
-            
-            let tempDir = FileManager.default.temporaryDirectory
-            let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
-            try? FileManager.default.removeItem(at: tempURL)
-            do {
-                try FileManager.default.copyItem(at: url, to: tempURL)
-                tempSelectedAudioURL = tempURL
-                originalAudioFileName = url.lastPathComponent
-            } catch {
-                print("[NewMeetingSheet] Copy temp file failed: \(error)")
+                print("[NewMeetingSheet] Selected file: \(url.path)")
+                let gained = url.startAccessingSecurityScopedResource()
+                defer {
+                    if gained {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                
+                let tempDir = FileManager.default.temporaryDirectory
+                let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
+                try? FileManager.default.removeItem(at: tempURL)
+                do {
+                    try FileManager.default.copyItem(at: url, to: tempURL)
+                    tempSelectedAudioURL = tempURL
+                    originalAudioFileName = url.lastPathComponent
+                    print("[NewMeetingSheet] Successfully copied to temp location: \(tempURL.path)")
+                } catch {
+                    print("[NewMeetingSheet] Copy temp file failed: \(error)")
+                }
+            case .failure(let error):
+                print("[NewMeetingSheet] File import failed: \(error.localizedDescription)")
             }
         }
         .onAppear {
