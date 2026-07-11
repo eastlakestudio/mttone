@@ -1,4 +1,6 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import AppKit
 
 struct NewMeetingSheet: View {
     @Bindable var viewModel: RecordingViewModel
@@ -10,7 +12,6 @@ struct NewMeetingSheet: View {
     @State private var attendeeText = ""
     @State private var attendees: [String] = []
     @State private var speakerSuggestions: [String] = []
-    @State private var isImporting = false
     @State private var recentMeetings: [Meeting] = []
     @State private var tempSelectedAudioURL: URL? = nil
     @State private var originalAudioFileName: String = ""
@@ -227,12 +228,8 @@ struct NewMeetingSheet: View {
                         
                         Button {
                             print("[NewMeetingSheet] Audio File Button clicked.")
-                            if viewModel.recordingMode != .importFile {
-                                viewModel.recordingMode = .importFile
-                            } else {
-                                print("[NewMeetingSheet] Already in importFile mode, triggering isImporting = true")
-                                isImporting = true
-                            }
+                            viewModel.recordingMode = .importFile
+                            selectAudioFile()
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "doc.fill")
@@ -323,48 +320,6 @@ struct NewMeetingSheet: View {
             .padding(.vertical, 12)
         }
         .frame(minWidth: 440, idealWidth: 480)
-        .onChange(of: viewModel.recordingMode) { _, newMode in
-            print("[NewMeetingSheet] recordingMode changed to: \(newMode)")
-            if newMode == .importFile {
-                print("[NewMeetingSheet] Triggering isImporting = true via onChange")
-                isImporting = true
-            }
-        }
-        .fileImporter(
-            isPresented: $isImporting,
-            allowedContentTypes: [.audio],
-            allowsMultipleSelection: false
-        ) { result in
-            print("[NewMeetingSheet] fileImporter callback triggered. Result: \(result)")
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else {
-                    print("[NewMeetingSheet] No URL found in success result.")
-                    return
-                }
-                print("[NewMeetingSheet] Selected file: \(url.path)")
-                let gained = url.startAccessingSecurityScopedResource()
-                defer {
-                    if gained {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-                
-                let tempDir = FileManager.default.temporaryDirectory
-                let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
-                try? FileManager.default.removeItem(at: tempURL)
-                do {
-                    try FileManager.default.copyItem(at: url, to: tempURL)
-                    tempSelectedAudioURL = tempURL
-                    originalAudioFileName = url.lastPathComponent
-                    print("[NewMeetingSheet] Successfully copied to temp location: \(tempURL.path)")
-                } catch {
-                    print("[NewMeetingSheet] Copy temp file failed: \(error)")
-                }
-            case .failure(let error):
-                print("[NewMeetingSheet] File import failed: \(error.localizedDescription)")
-            }
-        }
         .onAppear {
             locationSuggestions = databaseManager.fetchDistinctLocations()
             speakerSuggestions = databaseManager.fetchDistinctSpeakers()
@@ -402,6 +357,42 @@ struct NewMeetingSheet: View {
         let start = formatter.string(from: meeting.createdAt)
         let end = formatter.string(from: meeting.createdAt.addingTimeInterval(Double(meeting.duration)))
         return "\(meeting.title) (\(start)-\(end))"
+    }
+
+    private func selectAudioFile() {
+        print("[NewMeetingSheet] selectAudioFile() called via NSOpenPanel")
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [UTType.audio]
+        
+        panel.begin { response in
+            print("[NewMeetingSheet] NSOpenPanel finished. response: \(response)")
+            if response == .OK, let url = panel.url {
+                print("[NewMeetingSheet] User selected file: \(url.path)")
+                let gained = url.startAccessingSecurityScopedResource()
+                defer {
+                    if gained {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                
+                let tempDir = FileManager.default.temporaryDirectory
+                let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
+                try? FileManager.default.removeItem(at: tempURL)
+                do {
+                    try FileManager.default.copyItem(at: url, to: tempURL)
+                    tempSelectedAudioURL = tempURL
+                    originalAudioFileName = url.lastPathComponent
+                    print("[NewMeetingSheet] Successfully copied to temp location: \(tempURL.path)")
+                } catch {
+                    print("[NewMeetingSheet] Copy temp file failed: \(error)")
+                }
+            } else {
+                print("[NewMeetingSheet] NSOpenPanel was cancelled")
+            }
+        }
     }
 }
 
