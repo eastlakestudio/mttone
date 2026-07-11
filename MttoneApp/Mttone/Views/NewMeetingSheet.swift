@@ -35,11 +35,13 @@ struct NewMeetingSheet: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 16) {
-                // 1. 会议主题 (独占一行)
-                VStack(alignment: .leading, spacing: 6) {
+                // 1. 会议主题 (左对齐至右列)
+                HStack(spacing: 16) {
                     Text("会议主题")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .frame(width: 160, alignment: .leading)
+                    
                     TextField("输入会议主题", text: $viewModel.formTitle)
                         .textFieldStyle(.plain)
                         .padding(10)
@@ -48,53 +50,44 @@ struct NewMeetingSheet: View {
                 }
 
                 // 2. 开始时间 与 会议地点 (共用一行)
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("开始时间")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        Button {
-                            showDatePickerPopover = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "calendar")
-                                    .foregroundStyle(.purple)
-                                Text(formattedFormDate)
-                                    .font(.subheadline)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 16) {
+                    // 开始时间选择按钮 (左侧对齐)
+                    Button {
+                        showDatePickerPopover = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "calendar")
+                                .foregroundStyle(.purple)
+                            Text(formattedFormDate)
+                                .font(.subheadline)
                         }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showDatePickerPopover) {
-                            VStack {
-                                DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
-                                    .datePickerStyle(.graphical)
-                                    .labelsHidden()
-                            }
-                            .padding()
-                            .frame(width: 280, height: 320)
-                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.quaternary.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .frame(width: 180)
+                    .buttonStyle(.plain)
+                    .frame(width: 160)
+                    .popover(isPresented: $showDatePickerPopover) {
+                        VStack {
+                            DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
+                                .datePickerStyle(.graphical)
+                                .labelsHidden()
+                        }
+                        .padding()
+                        .frame(width: 280, height: 320)
+                    }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("会议地点")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("输入地点", text: $viewModel.formLocation)
-                            .textFieldStyle(.plain)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .onChange(of: viewModel.formLocation) { _, _ in
-                                showLocationSuggestions = !viewModel.formLocation.isEmpty
-                            }
-                            .onSubmit { showLocationSuggestions = false }
-                    }
+                    // 会议地点输入框 (右侧对齐)
+                    TextField("输入地点", text: $viewModel.formLocation)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .background(.quaternary.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .onChange(of: viewModel.formLocation) { _, _ in
+                            showLocationSuggestions = !viewModel.formLocation.isEmpty
+                        }
+                        .onSubmit { showLocationSuggestions = false }
                 }
 
                 if showLocationSuggestions && !viewModel.formLocation.isEmpty {
@@ -205,37 +198,40 @@ struct NewMeetingSheet: View {
                           .foregroundStyle(.secondary)
                       
                       HStack(spacing: 16) {
-                          // 实时录音 RadioButton
-                          Button {
-                              print("[NewMeetingSheet] Live Recording RadioButton clicked.")
-                              viewModel.recordingMode = .liveRecording
-                          } label: {
-                              HStack(spacing: 6) {
-                                  Image(systemName: viewModel.recordingMode == .liveRecording ? "largecircle.fill.circle" : "circle")
-                                      .foregroundStyle(viewModel.recordingMode == .liveRecording ? .purple : .secondary)
-                                  Text("实时录音")
-                                      .font(.subheadline)
+                          HStack(spacing: 12) {
+                              // 实时录音 RadioButton
+                              Button {
+                                  print("[NewMeetingSheet] Live Recording RadioButton clicked.")
+                                  viewModel.recordingMode = .liveRecording
+                              } label: {
+                                  HStack(spacing: 6) {
+                                      Image(systemName: viewModel.recordingMode == .liveRecording ? "largecircle.fill.circle" : "circle")
+                                          .foregroundStyle(viewModel.recordingMode == .liveRecording ? .purple : .secondary)
+                                      Text("实时录音")
+                                          .font(.subheadline)
+                                  }
                               }
-                          }
-                          .buttonStyle(.plain)
-                          .contentShape(Rectangle())
+                              .buttonStyle(.plain)
+                              .contentShape(Rectangle())
 
-                          // 音频文件 RadioButton
-                          Button {
-                              print("[NewMeetingSheet] Audio File RadioButton clicked.")
-                              viewModel.recordingMode = .importFile
-                          } label: {
-                              HStack(spacing: 6) {
-                                  Image(systemName: viewModel.recordingMode == .importFile ? "largecircle.fill.circle" : "circle")
-                                      .foregroundStyle(viewModel.recordingMode == .importFile ? .purple : .secondary)
-                                  Text("音频文件")
-                                      .font(.subheadline)
+                              // 音频文件 RadioButton
+                              Button {
+                                  print("[NewMeetingSheet] Audio File RadioButton clicked.")
+                                  viewModel.recordingMode = .importFile
+                              } label: {
+                                  HStack(spacing: 6) {
+                                      Image(systemName: viewModel.recordingMode == .importFile ? "largecircle.fill.circle" : "circle")
+                                          .foregroundStyle(viewModel.recordingMode == .importFile ? .purple : .secondary)
+                                      Text("音频文件")
+                                          .font(.subheadline)
+                                  }
                               }
+                              .buttonStyle(.plain)
+                              .contentShape(Rectangle())
                           }
-                          .buttonStyle(.plain)
-                          .contentShape(Rectangle())
+                          .frame(width: 160, alignment: .leading)
                           
-                          // 如果选择音频文件，展示文件名框和选择按钮
+                          // 如果选择音频文件，展示文件名框 and 选择按钮
                           if viewModel.recordingMode == .importFile {
                               HStack(spacing: 8) {
                                   // 文件名称框
@@ -273,7 +269,7 @@ struct NewMeetingSheet: View {
                 HStack(spacing: 16) {
                     Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
                         .font(.subheadline)
-                        .frame(width: 180, alignment: .leading)
+                        .frame(width: 160, alignment: .leading)
 
                     if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
                         Picker("", selection: $viewModel.selectedParentMeetingId) {
