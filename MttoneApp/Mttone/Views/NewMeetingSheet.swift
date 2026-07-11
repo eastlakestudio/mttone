@@ -35,22 +35,17 @@ struct NewMeetingSheet: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 16) {
-                // 1. 会议主题 (上下布局)
+                // 1. 会议主题 (独占一行)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("会议主题")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     
-                    HStack(spacing: 16) {
-                        Spacer()
-                            .frame(width: 160)
-                        
-                        TextField("输入会议主题", text: $viewModel.formTitle)
-                            .textFieldStyle(.plain)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
+                    TextField("输入会议主题", text: $viewModel.formTitle)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .background(.quaternary.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
                 // 2. 开始时间 与 会议地点 (共用一行)
