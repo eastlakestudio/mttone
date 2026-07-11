@@ -198,62 +198,76 @@ struct NewMeetingSheet: View {
                     }
                 }
 
-                // 4. 音频来源
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("音频来源")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
-                    HStack(spacing: 12) {
-                        Button {
-                            print("[NewMeetingSheet] Live Recording Button clicked.")
-                            viewModel.recordingMode = .liveRecording
-                        } label: {
-                            HStack {
-                                Image(systemName: "mic.fill")
-                                Text("实时录音")
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(viewModel.recordingMode == .liveRecording ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
-                            .foregroundStyle(viewModel.recordingMode == .liveRecording ? Color.purple : Color.primary)
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(viewModel.recordingMode == .liveRecording ? Color.purple : Color.clear, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Capsule())
-                        
-                        Button {
-                            print("[NewMeetingSheet] Audio File Button clicked.")
-                            viewModel.recordingMode = .importFile
-                            selectAudioFile()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "doc.fill")
-                                Text(originalAudioFileName.isEmpty ? "音频文件" : "音频文件: \(originalAudioFileName)")
-                                    .lineLimit(1)
-                                if !originalAudioFileName.isEmpty {
-                                    Image(systemName: "pencil.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                    }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(viewModel.recordingMode == .importFile ? Color.purple.opacity(0.15) : Color.gray.opacity(0.15))
-                            .foregroundStyle(viewModel.recordingMode == .importFile ? Color.purple : Color.primary)
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule()
-                                    .stroke(viewModel.recordingMode == .importFile ? Color.purple : Color.clear, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Capsule())
-                    }
-                }
+                  // 4. 音频来源
+                  VStack(alignment: .leading, spacing: 6) {
+                      Text("音频来源")
+                          .font(.caption)
+                          .foregroundStyle(.secondary)
+                      
+                      HStack(spacing: 16) {
+                          // 实时录音 RadioButton
+                          Button {
+                              print("[NewMeetingSheet] Live Recording RadioButton clicked.")
+                              viewModel.recordingMode = .liveRecording
+                          } label: {
+                              HStack(spacing: 6) {
+                                  Image(systemName: viewModel.recordingMode == .liveRecording ? "largecircle.fill.circle" : "circle")
+                                      .foregroundStyle(viewModel.recordingMode == .liveRecording ? .purple : .secondary)
+                                  Text("实时录音")
+                                      .font(.subheadline)
+                              }
+                          }
+                          .buttonStyle(.plain)
+                          .contentShape(Rectangle())
+
+                          // 音频文件 RadioButton
+                          Button {
+                              print("[NewMeetingSheet] Audio File RadioButton clicked.")
+                              viewModel.recordingMode = .importFile
+                          } label: {
+                              HStack(spacing: 6) {
+                                  Image(systemName: viewModel.recordingMode == .importFile ? "largecircle.fill.circle" : "circle")
+                                      .foregroundStyle(viewModel.recordingMode == .importFile ? .purple : .secondary)
+                                  Text("音频文件")
+                                      .font(.subheadline)
+                              }
+                          }
+                          .buttonStyle(.plain)
+                          .contentShape(Rectangle())
+                          
+                          // 如果选择音频文件，展示文件名框和选择按钮
+                          if viewModel.recordingMode == .importFile {
+                              HStack(spacing: 8) {
+                                  // 文件名称框
+                                  Text(originalAudioFileName.isEmpty ? "未选择音频文件" : originalAudioFileName)
+                                      .font(.subheadline)
+                                      .foregroundStyle(originalAudioFileName.isEmpty ? .secondary : .primary)
+                                      .lineLimit(1)
+                                      .padding(.horizontal, 10)
+                                      .padding(.vertical, 6)
+                                      .frame(maxWidth: .infinity, alignment: .leading)
+                                      .background(.quaternary.opacity(0.4))
+                                      .clipShape(RoundedRectangle(cornerRadius: 6))
+                                  
+                                  // 选择文件图标按钮
+                                  Button {
+                                      selectAudioFile()
+                                  } label: {
+                                      Image(systemName: "folder.badge.plus")
+                                          .font(.title3)
+                                          .foregroundStyle(.purple)
+                                          .padding(6)
+                                          .background(.purple.opacity(0.1))
+                                          .clipShape(RoundedRectangle(cornerRadius: 6))
+                                  }
+                                  .buttonStyle(.plain)
+                                  .help("选择音频文件")
+                              }
+                              .transition(.opacity)
+                          }
+                      }
+                      .frame(height: 32)
+                  }
 
                 // 5. 延续历史会议
                 HStack(spacing: 16) {
@@ -360,38 +374,37 @@ struct NewMeetingSheet: View {
     }
 
     private func selectAudioFile() {
-        print("[NewMeetingSheet] selectAudioFile() called via NSOpenPanel")
+        print("[NewMeetingSheet] selectAudioFile() called via NSOpenPanel runModal")
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = [UTType.audio]
         
-        panel.begin { response in
-            print("[NewMeetingSheet] NSOpenPanel finished. response: \(response)")
-            if response == .OK, let url = panel.url {
-                print("[NewMeetingSheet] User selected file: \(url.path)")
-                let gained = url.startAccessingSecurityScopedResource()
-                defer {
-                    if gained {
-                        url.stopAccessingSecurityScopedResource()
-                    }
+        let response = panel.runModal()
+        print("[NewMeetingSheet] NSOpenPanel runModal finished. Response: \(response)")
+        if response == .OK, let url = panel.url {
+            print("[NewMeetingSheet] User selected file: \(url.path)")
+            let gained = url.startAccessingSecurityScopedResource()
+            defer {
+                if gained {
+                    url.stopAccessingSecurityScopedResource()
                 }
-                
-                let tempDir = FileManager.default.temporaryDirectory
-                let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
-                try? FileManager.default.removeItem(at: tempURL)
-                do {
-                    try FileManager.default.copyItem(at: url, to: tempURL)
-                    tempSelectedAudioURL = tempURL
-                    originalAudioFileName = url.lastPathComponent
-                    print("[NewMeetingSheet] Successfully copied to temp location: \(tempURL.path)")
-                } catch {
-                    print("[NewMeetingSheet] Copy temp file failed: \(error)")
-                }
-            } else {
-                print("[NewMeetingSheet] NSOpenPanel was cancelled")
             }
+            
+            let tempDir = FileManager.default.temporaryDirectory
+            let tempURL = tempDir.appendingPathComponent("temp_import_\(UUID().uuidString).\(url.pathExtension)")
+            try? FileManager.default.removeItem(at: tempURL)
+            do {
+                try FileManager.default.copyItem(at: url, to: tempURL)
+                tempSelectedAudioURL = tempURL
+                originalAudioFileName = url.lastPathComponent
+                print("[NewMeetingSheet] Successfully copied to temp location: \(tempURL.path)")
+            } catch {
+                print("[NewMeetingSheet] Copy temp file failed: \(error)")
+            }
+        } else {
+            print("[NewMeetingSheet] NSOpenPanel was cancelled or failed")
         }
     }
 }
