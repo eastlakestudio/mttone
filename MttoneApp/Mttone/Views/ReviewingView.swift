@@ -153,8 +153,7 @@ struct ReviewingView: View {
                     } else {
                         if let meeting = viewModel.currentMeeting {
                             // 动态从 Documents 文件夹计算当前会议的绝对物理路径，避开硬编码/已过期的沙盒哈希
-                            let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-                            let url = docDir.appendingPathComponent("audio_\(meeting.id).wav")
+                            let url = meeting.localAudioURL
                             
                             // 无论是否播放过，如果当前时间等于总时长或者还没实例化，都进行全新播放
                             if viewModel.audioPlayer.currentTime >= viewModel.audioPlayer.duration - 0.1 || !viewModel.audioPlayer.hasPlayer {
@@ -215,8 +214,7 @@ struct ReviewingView: View {
 
     private func playSegment(_ segment: TranscriptSegment) {
         if let meeting = viewModel.currentMeeting {
-            let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let url = docDir.appendingPathComponent("audio_\(meeting.id).wav")
+            let url = meeting.localAudioURL
             
             // 如果还没初始化过播放器，则先初始化
             if !viewModel.audioPlayer.hasPlayer {

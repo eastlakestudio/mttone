@@ -24,3 +24,4 @@ src-tauri/target/
 # Node
 node_modules/
 
+MttoneApp/build_output/

@@ -127,9 +127,7 @@ struct MeetingListView: View {
         List(meetings) { meeting in
             Button {
                 recordingVM.currentMeeting = meeting
-                let finalPath = meeting.audioPath.isEmpty
-                    ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("audio_\(meeting.id).wav").path
-                    : meeting.audioPath
+                let finalPath = meeting.localAudioURL.path
                 recordingVM.currentMeeting?.audioPath = finalPath
 
                 recordingVM.audioPlayer.duration = TimeInterval(meeting.duration)

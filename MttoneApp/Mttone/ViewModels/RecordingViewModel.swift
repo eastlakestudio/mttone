@@ -178,8 +178,7 @@ final class RecordingViewModel {
     /// 运行本地大模型进行高精度离线转写
     private func runOfflineTranscription() {
         guard let meeting = currentMeeting else { return }
-        let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let audioURL = audioDir.appendingPathComponent("audio_\(meeting.id).wav")
+        let audioURL = meeting.localAudioURL
 
         runOfflineTranscription(for: meeting.id, audioURL: audioURL)
     }

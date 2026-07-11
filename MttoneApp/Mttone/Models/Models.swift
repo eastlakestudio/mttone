@@ -43,6 +43,34 @@ struct Meeting: Identifiable, Codable, Hashable {
     }
 }
 
+extension Meeting {
+    /// 获取当前会议音频的最新绝对 URL（适配沙盒重新启动后 UUID 发生变化的情况，并动态探测后缀）
+    var localAudioURL: URL {
+        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        
+        // 1. 如果存储的 audioPath 里面含有文件名，提取文件名
+        if !audioPath.isEmpty {
+            let lastPathComponent = URL(fileURLWithPath: audioPath).lastPathComponent
+            let targetURL = docDir.appendingPathComponent(lastPathComponent)
+            if FileManager.default.fileExists(atPath: targetURL.path) {
+                return targetURL
+            }
+        }
+        
+        // 2. 如果没有找到，做多后缀动态探测兜底
+        let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
+        for ext in allowedExts {
+            let url = docDir.appendingPathComponent("audio_\(id).\(ext)")
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        
+        // 3. 极速兜底：返回默认的 .wav
+        return docDir.appendingPathComponent("audio_\(id).wav")
+    }
+}
+
 // MARK: - 发言切片
 
 struct SpeechClip: Identifiable, Codable, Hashable {
