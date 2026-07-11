@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// 会议列表页（首页）
 struct MeetingListView: View {
@@ -7,14 +10,17 @@ struct MeetingListView: View {
     @State private var listVM: MeetingListViewModel?
     @State private var showPermissionAlert = false
     @State private var permissionAlertMessage = ""
+    @State private var isImporting = false
+    @State private var showDeleteSheet = false
+    @State private var deleteGroupMeetings: [Meeting] = []
+    @State private var deleteGroupClipCounts: [String: Int] = [:]
+    @State private var isExportingFile = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // 顶部状态栏
                 statusHeader
 
-                // 会议列表
                 if let vm = listVM {
                     if vm.meetings.isEmpty {
                         emptyState
@@ -38,19 +44,9 @@ struct MeetingListView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        Task {
-                            let granted = await recordingVM.audioRecorder.requestPermissions()
-                            await MainActor.run {
-                                if granted {
-                                    recordingVM.onTapStartRecording()
-                                } else {
-                                    permissionAlertMessage = recordingVM.audioRecorder.errorMessage ?? "麦克风或语音识别权限被拒绝"
-                                    showPermissionAlert = true
-                                }
-                            }
-                        }
+                        recordingVM.onTapStartRecording()
                     } label: {
-                        Label("开始新录音", systemImage: "mic.fill")
+                        Label("开始会议", systemImage: "pencil.and.list.clipboard")
                             .font(.headline)
                     }
                     .buttonStyle(.borderedProminent)
@@ -60,10 +56,31 @@ struct MeetingListView: View {
             .sheet(isPresented: $recordingVM.showNewMeetingSheet) {
                 NewMeetingSheet(viewModel: recordingVM)
             }
+            .onChange(of: recordingVM.showNewMeetingSheet) { _, newValue in
+                if !newValue && recordingVM.shouldTriggerImport {
+                    recordingVM.shouldTriggerImport = false
+                    isImporting = true
+                }
+            }
+            .sheet(isPresented: $showDeleteSheet) {
+                DeleteMeetingSheet(
+                    meetings: deleteGroupMeetings,
+                    speechClipCounts: deleteGroupClipCounts,
+                    onDelete: {
+                        for m in deleteGroupMeetings {
+                            try? databaseManager.deleteMeeting(id: m.id)
+                        }
+                        listVM?.loadMeetings()
+                    },
+                    onExportFile: { filePath in
+                        exportAudioFile(filePath)
+                    }
+                )
+            }
             .alert("权限不足", isPresented: $showPermissionAlert) {
                 Button("确定", role: .cancel) { }
             } message: {
-                Text("\(permissionAlertMessage)\n\n请前往「系统设置 - 隐私与安全性 - 麦克风/语音识别」中开启权限。如果是由于重签名导致卡死，您可能需要重启电脑或在终端重置 TCC 权限。")
+                Text("\(permissionAlertMessage)\n\n请前往「系统设置 - 隐私与安全性 - 麦克风/语音识别」中开启权限。")
             }
             .onAppear {
                 if listVM == nil {
@@ -72,9 +89,28 @@ struct MeetingListView: View {
                 listVM?.loadMeetings()
             }
             .onChange(of: recordingVM.meetingStatus) { _, newStatus in
-                // 当录音或回顾状态结束返回到空闲时，重新刷一次列表
                 if newStatus == .idle {
                     listVM?.loadMeetings()
+                }
+            }
+            .fileImporter(
+                isPresented: $isImporting,
+                allowedContentTypes: [.audio],
+                allowsMultipleSelection: false
+            ) { result in
+                guard let url = try? result.get().first else { return }
+                let gained = url.startAccessingSecurityScopedResource()
+                let title = recordingVM.formTitle
+                let location = recordingVM.formLocation
+                Task {
+                    await recordingVM.importAudioFile(
+                        from: url,
+                        title: title.isEmpty ? nil : title,
+                        location: location.isEmpty ? nil : location
+                    )
+                    if gained {
+                        url.stopAccessingSecurityScopedResource()
+                    }
                 }
             }
         }
@@ -107,7 +143,7 @@ struct MeetingListView: View {
             Text("暂无会议记录")
                 .font(.title3)
                 .foregroundStyle(.secondary)
-            Text("点击右上角「开始新录音」启动本地 ASR")
+            Text("点击右上角「开始会议」选择录音模式")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -118,25 +154,50 @@ struct MeetingListView: View {
         List(meetings) { meeting in
             Button {
                 recordingVM.currentMeeting = meeting
-                // 根据会议的音频路径，填充回放路径
-                let finalPath = meeting.audioPath.isEmpty 
-                    ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("audio_\(meeting.id).wav").path 
+                let finalPath = meeting.audioPath.isEmpty
+                    ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("audio_\(meeting.id).wav").path
                     : meeting.audioPath
                 recordingVM.currentMeeting?.audioPath = finalPath
-                
-                // 将历史会议的 duration (秒) 赋值给播放器
+
                 recordingVM.audioPlayer.duration = TimeInterval(meeting.duration)
                 recordingVM.audioPlayer.currentTime = 0
-                
-                // 从数据库加载该历史会议的语音片段，以便同步回放
+
                 recordingVM.loadSegmentsFromDatabase(meetingId: meeting.id)
                 recordingVM.meetingStatus = .reviewing
             } label: {
                 MeetingRow(meeting: meeting)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button(role: .destructive) {
+                    deleteGroupMeetings = databaseManager.fetchMeetingGroup(id: meeting.id)
+                    var counts: [String: Int] = [:]
+                    for m in deleteGroupMeetings {
+                        counts[m.id] = databaseManager.fetchSpeechClipsCount(meetingId: m.id)
+                    }
+                    deleteGroupClipCounts = counts
+                    showDeleteSheet = true
+                } label: {
+                    Label("删除会议", systemImage: "trash")
+                }
+            }
         }
         .listStyle(.sidebar)
+    }
+
+    private func exportAudioFile(_ sourcePath: String) {
+        let sourceURL = URL(fileURLWithPath: sourcePath)
+        guard FileManager.default.fileExists(atPath: sourcePath) else { return }
+        #if os(macOS)
+        let savePanel = NSSavePanel()
+        savePanel.title = "另存录音文件"
+        savePanel.nameFieldStringValue = sourceURL.lastPathComponent
+        savePanel.allowedContentTypes = [.audio]
+        savePanel.canCreateDirectories = true
+        if savePanel.runModal() == .OK, let destURL = savePanel.url {
+            try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+        }
+        #endif
     }
 }
 
@@ -147,7 +208,6 @@ struct MeetingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // 状态图标
             statusIcon
                 .frame(width: 40, height: 40)
                 .background(statusColor.opacity(0.15))
@@ -225,5 +285,155 @@ struct MeetingRow: View {
         let mins = meeting.duration / 60
         let secs = meeting.duration % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+}
+
+// MARK: - 删除会议确认弹窗
+
+struct DeleteMeetingSheet: View {
+    let meetings: [Meeting]
+    let speechClipCounts: [String: Int]
+    let onDelete: () -> Void
+    let onExportFile: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("删除会议")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("以下关联会议将被删除（含录音文件、转写文本和说话人分离数据），此操作不可撤销。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(meetings, id: \.id) { meeting in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "waveform")
+                                    .foregroundStyle(.purple)
+                                Text(meeting.title)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                Spacer()
+                                statusBadge(meeting)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: "doc.text")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    let fileName = URL(fileURLWithPath: meeting.audioPath).lastPathComponent
+                                    Text("录音文件: \(fileName)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Button {
+                                        onExportFile(meeting.audioPath)
+                                    } label: {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("另存录音文件")
+                                }
+
+                                let clipCount = speechClipCounts[meeting.id] ?? 0
+                                HStack {
+                                    Image(systemName: "bubble.left.and.bubble.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("语音剪辑: \(clipCount) 条")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Text("创建: \(meeting.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.leading, 24)
+                        }
+                        .padding(12)
+                        .background(.quaternary.opacity(0.3))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                        if meeting.id != meetings.last?.id {
+                            HStack(spacing: 0) {
+                                Rectangle()
+                                    .fill(.purple.opacity(0.2))
+                                    .frame(width: 2, height: 16)
+                                    .padding(.leading, 30)
+                                Text("延续")
+                                    .font(.caption2)
+                                    .foregroundStyle(.purple.opacity(0.6))
+                                    .padding(.leading, 8)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Button("取消") { dismiss() }
+                    .controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    onDelete()
+                    dismiss()
+                } label: {
+                    Label("确认删除", systemImage: "trash")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.red)
+            }
+            .padding()
+        }
+        .frame(minWidth: 420, minHeight: 300)
+    }
+
+    private func statusBadge(_ meeting: Meeting) -> some View {
+        Text(statusText(meeting))
+            .font(.caption2)
+            .fontWeight(.medium)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(statusColor(meeting).opacity(0.12))
+            .foregroundStyle(statusColor(meeting))
+            .clipShape(Capsule())
+    }
+
+    private func statusText(_ meeting: Meeting) -> String {
+        switch meeting.status {
+        case .recording: return "录音中"
+        case .pendingDiarization: return "待分离"
+        case .processingLlm: return "AI 处理中"
+        case .completed: return "已完成"
+        }
+    }
+
+    private func statusColor(_ meeting: Meeting) -> Color {
+        switch meeting.status {
+        case .recording: return .red
+        case .pendingDiarization: return .orange
+        case .processingLlm: return .blue
+        case .completed: return .green
+        }
     }
 }

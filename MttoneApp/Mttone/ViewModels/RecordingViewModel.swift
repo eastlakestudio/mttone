@@ -21,6 +21,15 @@ final class RecordingViewModel {
     var formAttendees = ""
     var shouldExtendLastMeeting = false // 是否延续上一次会议的开关
 
+    enum RecordingMode {
+        case liveRecording
+        case importFile
+    }
+
+    var recordingMode: RecordingMode = .liveRecording
+    var shouldTriggerImport = false  // sheet 关闭后触发文件导入
+    var showingMeetingEditor = false
+
     enum MeetingStatus {
         case idle
         case recording
@@ -169,40 +178,94 @@ final class RecordingViewModel {
         let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let audioURL = audioDir.appendingPathComponent("audio_\(meeting.id).wav")
 
+        runOfflineTranscription(for: meeting.id, audioURL: audioURL)
+    }
+
+    private func runOfflineTranscription(for meetingId: String, audioURL: URL) {
         isTranscribingOffline = true
         Task {
             do {
-                // 初始化模型（首次会自动下载）
                 try await WhisperService.shared.initialize()
                 
-                // 并行执行转写与声纹分离
-                async let whisperTask = WhisperService.shared.transcribe(audioURL: audioURL, meetingId: meeting.id)
+                async let whisperTask = WhisperService.shared.transcribe(audioURL: audioURL, meetingId: meetingId)
                 async let diarizationTask = DiarizationService.shared.diarize(audioURL: audioURL)
                 
                 let offlineSegments = try await whisperTask
                 let speakerSegments = try await diarizationTask
                 
-                // 将分离出的说话人标签精准对齐到每一句话上
                 let alignedSegments = self.alignSpeakerLabels(transcripts: offlineSegments, diarization: speakerSegments)
                 
-                // 回到主线程更新 UI 并持久化
                 await MainActor.run {
                     if alignedSegments.isEmpty == false {
                         self.transcriptSegments = alignedSegments
                     }
-                    self.saveSegmentsToDatabase(meetingId: meeting.id)
+                    self.saveSegmentsToDatabase(meetingId: meetingId)
                     self.isTranscribingOffline = false
                 }
             } catch {
                 print("[RecordingViewModel] 离线大模型转写失败: \(error)")
                 await MainActor.run {
                     self.errorAlert = "离线大模型转写/分离失败:\n\(error.localizedDescription)"
-                    // 如果大模型转写失败，保留原生识别的片段并持久化
-                    self.saveSegmentsToDatabase(meetingId: meeting.id)
+                    self.saveSegmentsToDatabase(meetingId: meetingId)
                     self.isTranscribingOffline = false
                 }
             }
         }
+    }
+
+    func importAudioFile(from sourceURL: URL, title: String? = nil, location: String? = nil) async {
+        let meetingId = UUID().uuidString
+        let ext = sourceURL.pathExtension.lowercased()
+        let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
+        guard allowedExts.contains(ext) else {
+            errorAlert = "不支持的音频格式: .\(ext)"
+            return
+        }
+
+        let destDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let destURL = destDir.appendingPathComponent("audio_\(meetingId).\(ext)")
+
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        } catch {
+            errorAlert = "文件复制失败: \(error.localizedDescription)"
+            return
+        }
+
+        let fileName = sourceURL.lastPathComponent
+        let meetingTitle = title ?? fileName.replacingOccurrences(
+            of: ".\(ext)", with: "",
+            options: .caseInsensitive
+        )
+
+        let meeting = Meeting(
+            id: meetingId,
+            parentMeetingId: nil,
+            title: meetingTitle,
+            location: location ?? "外部导入",
+            audioPath: destURL.path,
+            duration: 0,
+            status: .pendingDiarization,
+            summary: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        do {
+            try databaseManager.createMeeting(meeting)
+        } catch {
+            errorAlert = "创建会议失败: \(error.localizedDescription)"
+            try? FileManager.default.removeItem(at: destURL)
+            return
+        }
+
+        currentMeeting = meeting
+        audioPlayer.duration = 0
+        audioPlayer.currentTime = 0
+        transcriptSegments = []
+        meetingStatus = .reviewing
+
+        runOfflineTranscription(for: meetingId, audioURL: destURL)
     }
     
     // MARK: - 持久化与加载
@@ -305,6 +368,7 @@ final class RecordingViewModel {
         formLocation = ""
         formAttendees = ""
         shouldExtendLastMeeting = false
+        recordingMode = .liveRecording
     }
 
     /// 双模态对齐聚类算法：将声纹分离出的纯时间区间，匹配到带有文字的时间区间上

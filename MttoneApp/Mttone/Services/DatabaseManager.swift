@@ -131,6 +131,19 @@ final class DatabaseManager {
         print("[DB] Meeting created: \(meeting.id) - \(meeting.title)")
     }
 
+    func fixZombieMeetings() {
+        let sql = "UPDATE meetings SET status = 'pending_diarization' WHERE status = 'recording'"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            let count = sqlite3_changes(db)
+            if count > 0 {
+                print("[DB] Fixed \(count) zombie meeting(s) stuck in 'recording' status")
+            }
+        }
+    }
+
     /// 获取上一次会议的 ID
     func fetchLastMeetingId() -> String? {
         let sql = "SELECT id FROM meetings ORDER BY created_at DESC LIMIT 1"
@@ -147,7 +160,36 @@ final class DatabaseManager {
         return nil
     }
 
+    func fetchDistinctLocations() -> [String] {
+        let sql = "SELECT DISTINCT location FROM meetings WHERE location IS NOT NULL AND location != '' AND location != '外部导入' ORDER BY created_at DESC LIMIT 20"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var locations: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let loc = columnOptionalText(stmt, index: 0) {
+                locations.append(loc)
+            }
+        }
+        return locations
+    }
+
+    func fetchDistinctSpeakers() -> [String] {
+        let sql = "SELECT DISTINCT speaker_label FROM speech_clips WHERE speaker_label NOT LIKE 'Speaker_%' AND speaker_label != '' ORDER BY speaker_label ASC LIMIT 50"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var speakers: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            speakers.append(columnText(stmt, index: 0))
+        }
+        return speakers
+    }
+
     func fetchAllMeetings() -> [Meeting] {
+        fixZombieMeetings()
         let sql = "SELECT id, parent_meeting_id, title, location, audio_path, duration, status, summary, created_at, updated_at FROM meetings ORDER BY created_at DESC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -261,7 +303,84 @@ final class DatabaseManager {
             throw DBError.executeFailed(lastError)
         }
     }
-    
+
+    func fetchMeetingGroup(id: String) -> [Meeting] {
+        var group: [Meeting] = []
+        // 获取当前会议
+        let all = fetchAllMeetings()
+        guard let target = all.first(where: { $0.id == id }) else { return group }
+
+        // 回溯找到根会议
+        var root = target
+        while let parentId = root.parentMeetingId, let parent = all.first(where: { $0.id == parentId }) {
+            root = parent
+        }
+
+        // 收集根及其所有子孙
+        let rootId = root.id
+        for m in all {
+            if m.id == rootId || m.parentMeetingId == rootId || isChildOf(rootId: rootId, meeting: m, all: all) {
+                group.append(m)
+            }
+        }
+        if group.isEmpty { group.append(target) }
+        group.sort { ($0.createdAt) < ($1.createdAt) }
+        return group
+    }
+
+    private func isChildOf(rootId: String, meeting: Meeting, all: [Meeting]) -> Bool {
+        var current = meeting
+        while let parentId = current.parentMeetingId {
+            if parentId == rootId { return true }
+            guard let parent = all.first(where: { $0.id == parentId }) else { return false }
+            current = parent
+        }
+        return false
+    }
+
+    func fetchSpeechClipsCount(meetingId: String) -> Int {
+        let sql = "SELECT COUNT(*) FROM speech_clips WHERE meeting_id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, meetingId.cString, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            return Int(sqlite3_column_int(stmt, 0))
+        }
+        return 0
+    }
+
+    func deleteMeeting(id: String) throws {
+        let sql = "SELECT audio_path FROM meetings WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        sqlite3_bind_text(stmt, 1, id.cString, -1, SQLITE_TRANSIENT)
+
+        var audioPath: String?
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            audioPath = columnOptionalText(stmt, index: 0)
+        }
+        sqlite3_finalize(stmt)
+        stmt = nil
+
+        let deleteSQL = "DELETE FROM meetings WHERE id = ?"
+        guard sqlite3_prepare_v2(db, deleteSQL, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        sqlite3_bind_text(stmt, 1, id.cString, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            sqlite3_finalize(stmt)
+            throw DBError.executeFailed(lastError)
+        }
+        sqlite3_finalize(stmt)
+
+        if let path = audioPath, FileManager.default.fileExists(atPath: path) {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+    }
+
     func fetchSpeechClips(meetingId: String) -> [SpeechClip] {
         let sql = "SELECT id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at FROM speech_clips WHERE meeting_id = ? ORDER BY start_time ASC"
         var stmt: OpaquePointer?
