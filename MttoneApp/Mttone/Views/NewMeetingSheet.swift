@@ -46,23 +46,8 @@ struct NewMeetingSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
-                // 2. 会议地点 与 开始时间 (共用一行)
+                // 2. 开始时间 与 会议地点 (共用一行)
                 HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("会议地点")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextField("输入地点", text: $viewModel.formLocation)
-                            .textFieldStyle(.plain)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .onChange(of: viewModel.formLocation) { _, _ in
-                                showLocationSuggestions = !viewModel.formLocation.isEmpty
-                            }
-                            .onSubmit { showLocationSuggestions = false }
-                    }
-
                     VStack(alignment: .leading, spacing: 6) {
                         Text("开始时间")
                             .font(.caption)
@@ -94,6 +79,21 @@ struct NewMeetingSheet: View {
                         }
                     }
                     .frame(width: 180)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("会议地点")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("输入地点", text: $viewModel.formLocation)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(.quaternary.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .onChange(of: viewModel.formLocation) { _, _ in
+                                showLocationSuggestions = !viewModel.formLocation.isEmpty
+                            }
+                            .onSubmit { showLocationSuggestions = false }
+                    }
                 }
 
                 if showLocationSuggestions && !viewModel.formLocation.isEmpty {
@@ -256,21 +256,20 @@ struct NewMeetingSheet: View {
                 }
 
                 // 5. 延续历史会议
-                HStack {
+                HStack(spacing: 16) {
                     Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
                         .font(.subheadline)
-
-                    Spacer()
+                        .frame(width: 180, alignment: .leading)
 
                     if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
                         Picker("", selection: $viewModel.selectedParentMeetingId) {
                             ForEach(recentMeetings, id: \.id) { meeting in
-                                Text(meeting.title).tag(String?.some(meeting.id))
+                                Text(meetingPickerTitle(for: meeting)).tag(String?.some(meeting.id))
                             }
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
-                        .frame(width: 180)
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -392,6 +391,14 @@ struct NewMeetingSheet: View {
             attendees.append(trimmed)
         }
         attendeeText = ""
+    }
+
+    private func meetingPickerTitle(for meeting: Meeting) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        let start = formatter.string(from: meeting.createdAt)
+        let end = formatter.string(from: meeting.createdAt.addingTimeInterval(Double(meeting.duration)))
+        return "\(meeting.title) (\(start)-\(end))"
     }
 }
 
