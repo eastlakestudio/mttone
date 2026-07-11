@@ -13,6 +13,7 @@ struct Meeting: Identifiable, Codable, Hashable {
     var summary: String?
     var createdAt: Date
     var updatedAt: Date
+    var attendees: String? // 新增：空格分隔的参会人姓名列表
 
     enum Status: String, Codable, CaseIterable {
         case recording
@@ -38,7 +39,8 @@ struct Meeting: Identifiable, Codable, Hashable {
             status: .recording,
             summary: nil,
             createdAt: now,
-            updatedAt: now
+            updatedAt: now,
+            attendees: nil
         )
     }
 }

@@ -274,6 +274,32 @@ final class RecordingViewModel {
 
         runOfflineTranscription(for: meetingId, audioURL: destURL)
     }
+
+    /// 更新当前会议的元数据并写入数据库 (非模态修改用)
+    func updateMeetingMetadata(title: String, location: String?, createdAt: Date, attendees: String, duration: Int? = nil) {
+        guard var meeting = currentMeeting else { return }
+        meeting.title = title
+        meeting.location = location
+        meeting.createdAt = createdAt
+        meeting.attendees = attendees
+        if let d = duration {
+            meeting.duration = d
+        }
+        
+        do {
+            try databaseManager.updateMeetingInfo(
+                id: meeting.id,
+                title: title,
+                location: location,
+                createdAt: createdAt,
+                attendees: attendees,
+                duration: duration
+            )
+            currentMeeting = meeting
+        } catch {
+            print("[RecordingViewModel] Failed to update meeting metadata: \(error)")
+        }
+    }
     
     // MARK: - 持久化与加载
     
@@ -323,16 +349,31 @@ final class RecordingViewModel {
         }
     }
 
+    /// 获取当前所有片段中出现的不重复说话人列表
+    var uniqueSpeakers: [String] {
+        var speakers = Set<String>()
+        for segment in transcriptSegments {
+            speakers.insert(segment.speakerLabel)
+        }
+        return Array(speakers).sorted()
+    }
+
+    /// 全局重命名说话人（并同步更新所有相关片段）
+    func globalRenameSpeaker(oldName: String, newName: String) {
+        guard oldName != newName else { return }
+        for i in 0..<transcriptSegments.count {
+            if transcriptSegments[i].speakerLabel == oldName {
+                transcriptSegments[i].speakerLabel = newName
+            }
+        }
+    }
+
     /// 更新片段发言人标签
     func updateSpeakerLabel(id: String, newLabel: String) {
         if let index = transcriptSegments.firstIndex(where: { $0.id == id }) {
             let oldLabel = transcriptSegments[index].speakerLabel
-            // 这里也可以做全局替换：把所有旧 label 都换成新的
-            for i in 0..<transcriptSegments.count {
-                if transcriptSegments[i].speakerLabel == oldLabel {
-                    transcriptSegments[i].speakerLabel = newLabel
-                }
-            }
+            // 全局替换：把所有旧 label 都换成新的
+            globalRenameSpeaker(oldName: oldLabel, newName: newLabel)
         }
     }
 

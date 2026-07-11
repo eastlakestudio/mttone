@@ -60,6 +60,7 @@ final class DatabaseManager {
             summary TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
+            attendees TEXT,
             FOREIGN KEY (parent_meeting_id) REFERENCES meetings(id) ON DELETE SET NULL
         );
 
@@ -101,6 +102,24 @@ final class DatabaseManager {
             print("[DB] ERROR: Failed to create tables: \(errmsg)")
         } else {
             print("[DB] Tables created successfully")
+            
+            // 增量在数据库中检查并补全 attendees 字段
+            let checkColumnSql = "PRAGMA table_info(meetings);"
+            var checkStmt: OpaquePointer?
+            var hasAttendees = false
+            if sqlite3_prepare_v2(db, checkColumnSql, -1, &checkStmt, nil) == SQLITE_OK {
+                while sqlite3_step(checkStmt) == SQLITE_ROW {
+                    if let name = columnOptionalText(checkStmt, index: 1), name == "attendees" {
+                        hasAttendees = true
+                        break
+                    }
+                }
+                sqlite3_finalize(checkStmt)
+            }
+            if !hasAttendees {
+                sqlite3_exec(db, "ALTER TABLE meetings ADD COLUMN attendees TEXT;", nil, nil, nil)
+                print("[DB] Added attendees column to meetings table successfully.")
+            }
         }
     }
 
@@ -108,8 +127,8 @@ final class DatabaseManager {
 
     func createMeeting(_ meeting: Meeting) throws {
         let sql = """
-        INSERT INTO meetings (id, parent_meeting_id, title, location, audio_path, duration, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO meetings (id, parent_meeting_id, title, location, audio_path, duration, status, attendees)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
@@ -124,6 +143,7 @@ final class DatabaseManager {
         sqlite3_bind_text(stmt, 5, meeting.audioPath.cString, -1, SQLITE_TRANSIENT)
         sqlite3_bind_int(stmt, 6, Int32(meeting.duration))
         sqlite3_bind_text(stmt, 7, meeting.status.rawValue.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 8, value: meeting.attendees)
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DBError.executeFailed(lastError)
@@ -190,7 +210,7 @@ final class DatabaseManager {
 
     func fetchAllMeetings() -> [Meeting] {
         fixZombieMeetings()
-        let sql = "SELECT id, parent_meeting_id, title, location, audio_path, duration, status, summary, created_at, updated_at FROM meetings ORDER BY created_at DESC"
+        let sql = "SELECT id, parent_meeting_id, title, location, audio_path, duration, status, summary, created_at, updated_at, attendees FROM meetings ORDER BY created_at DESC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             print("[DB] ERROR fetching meetings: \(lastError)")
@@ -213,6 +233,7 @@ final class DatabaseManager {
             let summary = columnOptionalText(stmt, index: 7)
             let createdAtStr = columnText(stmt, index: 8)
             let updatedAtStr = columnText(stmt, index: 9)
+            let attendees = columnOptionalText(stmt, index: 10)
 
             let status = Meeting.Status(rawValue: statusStr) ?? .recording
             let createdAt = dateFormatter.date(from: createdAtStr) ?? Date()
@@ -228,10 +249,46 @@ final class DatabaseManager {
                 status: status,
                 summary: summary,
                 createdAt: createdAt,
-                updatedAt: updatedAt
+                updatedAt: updatedAt,
+                attendees: attendees
             ))
         }
         return meetings
+    }
+
+    func updateMeetingInfo(id: String, title: String, location: String?, createdAt: Date, attendees: String?, duration: Int? = nil) throws {
+        let sql = """
+        UPDATE meetings 
+        SET title = ?, location = ?, created_at = ?, attendees = ?, updated_at = datetime('now')
+        """ + (duration != nil ? ", duration = ?" : "") + """
+        WHERE id = ?
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dateStr = dateFormatter.string(from: createdAt)
+        
+        sqlite3_bind_text(stmt, 1, title.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 2, value: location)
+        sqlite3_bind_text(stmt, 3, dateStr.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 4, value: attendees)
+        
+        var nextIndex: Int32 = 5
+        if let d = duration {
+            sqlite3_bind_int(stmt, nextIndex, Int32(d))
+            nextIndex += 1
+        }
+        sqlite3_bind_text(stmt, nextIndex, id.cString, -1, SQLITE_TRANSIENT)
+        
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+        print("[DB] Meeting \(id) info updated.")
     }
 
     func updateMeetingStatus(id: String, status: Meeting.Status, duration: Int? = nil) throws {

@@ -152,6 +152,7 @@ struct RecordingView: View {
 struct TranscriptBubble: View {
     let segment: TranscriptSegment
     var isActive: Bool = false
+    var attendees: [String] = [] // 新增：可用的参会人列表
     var onTextChange: ((String) -> Void)? = nil
     var onSpeakerChange: ((String) -> Void)? = nil
 
@@ -159,9 +160,10 @@ struct TranscriptBubble: View {
     @State private var isEditingSpeaker = false
     @State private var editedSpeaker: String
 
-    init(segment: TranscriptSegment, isActive: Bool = false, onTextChange: ((String) -> Void)? = nil, onSpeakerChange: ((String) -> Void)? = nil) {
+    init(segment: TranscriptSegment, isActive: Bool = false, attendees: [String] = [], onTextChange: ((String) -> Void)? = nil, onSpeakerChange: ((String) -> Void)? = nil) {
         self.segment = segment
         self.isActive = isActive
+        self.attendees = attendees
         self.onTextChange = onTextChange
         self.onSpeakerChange = onSpeakerChange
         self._editedText = State(initialValue: segment.text)
@@ -172,16 +174,36 @@ struct TranscriptBubble: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 if onSpeakerChange != nil {
-                    TextField("说话人", text: $editedSpeaker, onEditingChanged: { editing in
-                        if !editing && editedSpeaker != segment.speakerLabel {
-                            onSpeakerChange?(editedSpeaker)
+                    HStack(spacing: 2) {
+                        TextField("说话人", text: $editedSpeaker, onEditingChanged: { editing in
+                            if !editing && editedSpeaker != segment.speakerLabel {
+                                onSpeakerChange?(editedSpeaker)
+                            }
+                        })
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.purple)
+                        .textFieldStyle(.plain)
+                        .frame(width: 80)
+                        
+                        if !attendees.isEmpty {
+                            Menu {
+                                ForEach(attendees, id: \.self) { person in
+                                    Button(person) {
+                                        editedSpeaker = person
+                                        onSpeakerChange?(person)
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(.purple)
+                            }
+                            .menuStyle(.button)
+                            .buttonStyle(.plain)
+                            .frame(width: 12)
                         }
-                    })
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.purple)
-                    .textFieldStyle(.plain)
-                    .frame(width: 80)
+                    }
                 } else {
                     Text(segment.speakerLabel)
                         .font(.caption)
