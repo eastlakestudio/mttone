@@ -98,10 +98,27 @@ struct MeetingListView: View {
             Text("准备就绪")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                
             Spacer()
+            
+            NavigationLink(destination: GlobalSpeakerListView()) {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.3.sequence.fill")
+                    Text("声纹字典")
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(.purple.opacity(0.1))
+                .foregroundStyle(.purple)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            
             Text("本地离线会议纪要与声纹人脉库")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .padding(.leading, 8)
         }
         .padding()
         .background(.ultraThinMaterial)

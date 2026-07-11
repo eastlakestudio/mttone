@@ -153,19 +153,35 @@ struct TranscriptBubble: View {
     let segment: TranscriptSegment
     var isActive: Bool = false
     var attendees: [String] = [] // 新增：可用的参会人列表
+    var contacts: [String] = []  // 新增：全局联系人列表
     var onTextChange: ((String) -> Void)? = nil
     var onSpeakerChange: ((String) -> Void)? = nil
+    var onPlay: (() -> Void)? = nil
+    var onSplit: ((String, String, String?) -> Void)? = nil
 
     @State private var editedText: String
     @State private var isEditingSpeaker = false
     @State private var editedSpeaker: String
+    @State private var showRenamePopover = false
+    @State private var newSpeakerTempName = ""
+    @State private var showSplitPopover = false
+    @State private var splitText1 = ""
+    @State private var splitText2 = ""
+    @State private var newSpeakerForPart2 = ""
 
-    init(segment: TranscriptSegment, isActive: Bool = false, attendees: [String] = [], onTextChange: ((String) -> Void)? = nil, onSpeakerChange: ((String) -> Void)? = nil) {
+    private var otherContacts: [String] {
+        contacts.filter { !attendees.contains($0) }
+    }
+
+    init(segment: TranscriptSegment, isActive: Bool = false, attendees: [String] = [], contacts: [String] = [], onTextChange: ((String) -> Void)? = nil, onSpeakerChange: ((String) -> Void)? = nil, onPlay: (() -> Void)? = nil, onSplit: ((String, String, String?) -> Void)? = nil) {
         self.segment = segment
         self.isActive = isActive
         self.attendees = attendees
+        self.contacts = contacts
         self.onTextChange = onTextChange
         self.onSpeakerChange = onSpeakerChange
+        self.onPlay = onPlay
+        self.onSplit = onSplit
         self._editedText = State(initialValue: segment.text)
         self._editedSpeaker = State(initialValue: segment.speakerLabel)
     }
@@ -174,35 +190,80 @@ struct TranscriptBubble: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 if onSpeakerChange != nil {
-                    HStack(spacing: 2) {
-                        TextField("说话人", text: $editedSpeaker, onEditingChanged: { editing in
-                            if !editing && editedSpeaker != segment.speakerLabel {
-                                onSpeakerChange?(editedSpeaker)
-                            }
-                        })
-                        .font(.caption)
-                        .fontWeight(.bold)
-                        .foregroundStyle(.purple)
-                        .textFieldStyle(.plain)
-                        .frame(width: 80)
-                        
+                    Menu {
                         if !attendees.isEmpty {
-                            Menu {
+                            Section("当前会议参会人") {
                                 ForEach(attendees, id: \.self) { person in
                                     Button(person) {
-                                        editedSpeaker = person
                                         onSpeakerChange?(person)
                                     }
                                 }
-                            } label: {
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 8))
-                                    .foregroundStyle(.purple)
                             }
-                            .menuStyle(.button)
-                            .buttonStyle(.plain)
-                            .frame(width: 12)
                         }
+                        
+                        if !otherContacts.isEmpty {
+                            Section("声纹字典联系人") {
+                                ForEach(otherContacts, id: \.self) { contactName in
+                                    Button(contactName) {
+                                        onSpeakerChange?(contactName)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Section("全局重命名") {
+                            Button("新建声纹人并绑定...") {
+                                newSpeakerTempName = ""
+                                showRenamePopover = true
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(segment.speakerLabel)
+                                .font(.caption)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.purple)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.purple)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showRenamePopover) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("输入新名字进行全局重命名")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("新名字", text: $newSpeakerTempName)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    if !newSpeakerTempName.trimmingCharacters(in: .whitespaces).isEmpty {
+                                        onSpeakerChange?(newSpeakerTempName)
+                                        showRenamePopover = false
+                                    }
+                                }
+                            HStack {
+                                Spacer()
+                                Button("取消") {
+                                    showRenamePopover = false
+                                }
+                                Button("确定") {
+                                    if !newSpeakerTempName.trimmingCharacters(in: .whitespaces).isEmpty {
+                                        onSpeakerChange?(newSpeakerTempName)
+                                        showRenamePopover = false
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                            .font(.caption)
+                        }
+                        .padding()
+                        .frame(width: 220)
                     }
                 } else {
                     Text(segment.speakerLabel)
@@ -214,6 +275,115 @@ struct TranscriptBubble: View {
                 Text(segment.formattedTime)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    
+                if let onPlay = onPlay {
+                    Button(action: onPlay) {
+                        Image(systemName: "play.circle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if onSplit != nil {
+                    Button {
+                        splitText1 = editedText
+                        splitText2 = ""
+                        newSpeakerForPart2 = ""
+                        showSplitPopover = true
+                    } label: {
+                        Image(systemName: "scissors")
+                            .foregroundStyle(.purple)
+                    }
+                    .buttonStyle(.plain)
+                    .help("在此处拆分文本")
+                    .popover(isPresented: $showSplitPopover) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("拆分并重分配")
+                                .font(.headline)
+                            
+                            Text("第一段内容 (在里面按回车切分):")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            TextEditor(text: $splitText1)
+                                .frame(height: 80)
+                                .onChange(of: splitText1) { _, newValue in
+                                    if newValue.contains("\n") {
+                                        let parts = newValue.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+                                        if parts.count == 2 {
+                                            splitText1 = String(parts[0])
+                                            splitText2 = String(parts[1])
+                                        }
+                                    }
+                                }
+                            
+                            if !splitText2.isEmpty {
+                                Text("第二段内容:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                
+                                TextEditor(text: $splitText2)
+                                    .frame(height: 60)
+                                
+                                Text("分配第二段给说话人:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                
+                                Menu {
+                                    if !attendees.isEmpty {
+                                        Section("当前会议参会人") {
+                                            ForEach(attendees, id: \.self) { person in
+                                                Button(person) {
+                                                    newSpeakerForPart2 = person
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if !otherContacts.isEmpty {
+                                        Section("声纹字典联系人") {
+                                            ForEach(otherContacts, id: \.self) { contactName in
+                                                Button(contactName) {
+                                                    newSpeakerForPart2 = contactName
+                                                }
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(newSpeakerForPart2.isEmpty ? "保持相同 (\(segment.speakerLabel))" : newSpeakerForPart2)
+                                        Spacer()
+                                        Image(systemName: "chevron.down")
+                                    }
+                                    .padding(4)
+                                    .background(Color.gray.opacity(0.1))
+                                    .cornerRadius(4)
+                                }
+                                .menuStyle(.button)
+                                .buttonStyle(.plain)
+                                
+                                TextField("或输入新说话人姓名...", text: $newSpeakerForPart2)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            
+                            HStack {
+                                Spacer()
+                                Button("取消") {
+                                    showSplitPopover = false
+                                }
+                                Button("确认拆分") {
+                                    if !splitText1.isEmpty && !splitText2.isEmpty {
+                                        onSplit?(splitText1, splitText2, newSpeakerForPart2.isEmpty ? nil : newSpeakerForPart2)
+                                        showSplitPopover = false
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(splitText1.isEmpty || splitText2.isEmpty)
+                            }
+                        }
+                        .padding()
+                        .frame(width: 320)
+                    }
+                }
 
                 if !segment.isFinal {
                     ProgressView()
@@ -226,8 +396,20 @@ struct TranscriptBubble: View {
                     .font(.body)
                     .foregroundStyle(.primary)
                     .textFieldStyle(.plain)
-                    .onChange(of: editedText) { _, newValue in
-                        onTextChange?(newValue)
+                    .onChange(of: editedText) { oldValue, newValue in
+                        if newValue.contains("\n") {
+                            // User pressed Enter -> split!
+                            let parts = newValue.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+                            if parts.count == 2 {
+                                let t1 = String(parts[0])
+                                let t2 = String(parts[1])
+                                // Revert to t1 immediately to avoid newline artifacts
+                                editedText = t1
+                                onSplit?(t1, t2, nil)
+                            }
+                        } else {
+                            onTextChange?(newValue)
+                        }
                     }
             } else {
                 Text(segment.text)
@@ -250,9 +432,10 @@ struct TranscriptBubble: View {
                 .stroke(isActive ? Color.purple.opacity(0.5) : Color.clear, lineWidth: 2)
         )
         .onChange(of: segment.text) { _, newText in
-            if editedText != newText && onTextChange == nil {
-                editedText = newText
-            }
+            editedText = newText
+        }
+        .onChange(of: segment.speakerLabel) { _, newLabel in
+            editedSpeaker = newLabel
         }
     }
 }

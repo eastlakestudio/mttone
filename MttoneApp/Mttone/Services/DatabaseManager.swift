@@ -481,6 +481,190 @@ final class DatabaseManager {
         return clips
     }
 
+    func fetchSpeechClips(forContact contactId: String) -> [SpeechClip] {
+        let sql = "SELECT id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at FROM speech_clips WHERE contact_id = ? ORDER BY start_time ASC"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[DB] ERROR fetching speech clips for contact: \(lastError)")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        sqlite3_bind_text(stmt, 1, contactId.cString, -1, SQLITE_TRANSIENT)
+        
+        var clips: [SpeechClip] = []
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = columnText(stmt, index: 0)
+            let mId = columnText(stmt, index: 1)
+            let speaker = columnText(stmt, index: 2)
+            let cId = columnOptionalText(stmt, index: 3)
+            let start = sqlite3_column_double(stmt, 4)
+            let end = sqlite3_column_double(stmt, 5)
+            let text = columnText(stmt, index: 6)
+            let cleaned = columnOptionalText(stmt, index: 7)
+            let path = columnOptionalText(stmt, index: 8)
+            let isKey = sqlite3_column_int(stmt, 9) != 0
+            
+            clips.append(SpeechClip(
+                id: id,
+                meetingId: mId,
+                speakerLabel: speaker,
+                contactId: cId,
+                startTime: start,
+                endTime: end,
+                originalText: text,
+                cleanedText: cleaned,
+                audioClipPath: path,
+                isKeyClip: isKey
+            ))
+        }
+        return clips
+    }
+    
+    func splitSpeechClip(oldClipId: String, newClip1: SpeechClip, newClip2: SpeechClip) throws {
+        // Begin Transaction
+        guard sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil) == SQLITE_OK else {
+            throw DBError.executeFailed("BEGIN TRANSACTION: " + lastError)
+        }
+        
+        do {
+            // 1. Delete old
+            let deleteSql = "DELETE FROM speech_clips WHERE id = ?"
+            var delStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, deleteSql, -1, &delStmt, nil) == SQLITE_OK else {
+                throw DBError.prepareFailed("DELETE speech_clips: " + lastError)
+            }
+            sqlite3_bind_text(delStmt, 1, oldClipId.cString, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(delStmt) != SQLITE_DONE {
+                sqlite3_finalize(delStmt)
+                throw DBError.executeFailed("DELETE step: " + lastError)
+            }
+            sqlite3_finalize(delStmt)
+            
+            // 2. Insert new 1
+            try insertSpeechClipInsideTransaction(clip: newClip1)
+            // 3. Insert new 2
+            try insertSpeechClipInsideTransaction(clip: newClip2)
+            
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw DBError.executeFailed("COMMIT: " + lastError)
+            }
+        } catch {
+            sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+    
+    private func insertSpeechClipInsideTransaction(clip: SpeechClip) throws {
+        let sql = """
+        INSERT INTO speech_clips (id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed("INSERT speech_clips: " + lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        sqlite3_bind_text(stmt, 1, clip.id.cString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, clip.meetingId.cString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 3, clip.speakerLabel.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 4, value: clip.contactId)
+        sqlite3_bind_double(stmt, 5, clip.startTime)
+        sqlite3_bind_double(stmt, 6, clip.endTime)
+        sqlite3_bind_text(stmt, 7, clip.originalText.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 8, value: clip.cleanedText)
+        bindOptionalText(stmt, index: 9, value: clip.audioClipPath)
+        sqlite3_bind_int(stmt, 10, clip.isKeyClip ? 1 : 0)
+        
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            throw DBError.executeFailed("INSERT step: " + lastError)
+        }
+    }
+    
+    // MARK: - Contacts CRUD
+    
+    func fetchAllContacts() -> [Contact] {
+        let sql = "SELECT id, name, avatar_url, created_at, updated_at FROM contacts ORDER BY created_at DESC"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        var contacts: [Contact] = []
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = columnText(stmt, index: 0)
+            let name = columnText(stmt, index: 1)
+            let avatar = columnOptionalText(stmt, index: 2)
+            let created = dateFormatter.date(from: columnText(stmt, index: 3)) ?? Date()
+            let updated = dateFormatter.date(from: columnText(stmt, index: 4)) ?? Date()
+            
+            contacts.append(Contact(id: id, name: name, avatarUrl: avatar, createdAt: created, updatedAt: updated))
+        }
+        return contacts
+    }
+    
+    func saveContact(_ contact: Contact) throws {
+        let sql = """
+        INSERT INTO contacts (id, name, avatar_url, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET 
+            name = excluded.name, 
+            avatar_url = excluded.avatar_url, 
+            updated_at = excluded.updated_at
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        sqlite3_bind_text(stmt, 1, contact.id.cString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, contact.name.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 3, value: contact.avatarUrl)
+        sqlite3_bind_text(stmt, 4, dateFormatter.string(from: contact.createdAt).cString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 5, dateFormatter.string(from: contact.updatedAt).cString, -1, SQLITE_TRANSIENT)
+        
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+    }
+    
+    func fetchContact(byName name: String) -> Contact? {
+        let sql = "SELECT id, name, avatar_url, created_at, updated_at FROM contacts WHERE name = ? LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        
+        sqlite3_bind_text(stmt, 1, name.cString, -1, SQLITE_TRANSIENT)
+        
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            let id = columnText(stmt, index: 0)
+            let fetchedName = columnText(stmt, index: 1)
+            let avatar = columnOptionalText(stmt, index: 2)
+            let created = dateFormatter.date(from: columnText(stmt, index: 3)) ?? Date()
+            let updated = dateFormatter.date(from: columnText(stmt, index: 4)) ?? Date()
+            
+            return Contact(id: id, name: fetchedName, avatarUrl: avatar, createdAt: created, updatedAt: updated)
+        }
+        return nil
+    }
+
     // MARK: - SQLite Helpers
 
     private var lastError: String {

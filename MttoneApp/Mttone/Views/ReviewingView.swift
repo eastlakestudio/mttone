@@ -3,6 +3,7 @@ import SwiftUI
 /// 录音结束后的回顾页面
 struct ReviewingView: View {
     @Bindable var viewModel: RecordingViewModel
+    @Environment(DatabaseManager.self) private var databaseManager
     @State private var activeSegmentId: String? = nil
     
     // 非模态侧边属性检查器状态
@@ -14,12 +15,25 @@ struct ReviewingView: View {
     @State private var newAttendeeName = ""
     @State private var showDatePickerPopover = false
     @State private var showEndDatePickerPopover = false
+    @State private var selectedHighlightSpeaker: String? = nil
 
     // 解析当前参会人为独立的名字数组
     private var editedAttendeesList: [String] {
         let attendeesString = viewModel.currentMeeting?.attendees ?? ""
         if attendeesString.isEmpty { return [] }
         return attendeesString.split(separator: " ").map(String.init)
+    }
+
+    private var speakerStats: [(speaker: String, count: Int, duration: Double)] {
+        var stats = [String: (count: Int, duration: Double)]()
+        for segment in viewModel.transcriptSegments.filter({ $0.isFinal }) {
+            let current = stats[segment.speakerLabel] ?? (0, 0.0)
+            let segDur = max(0, segment.endTime - segment.startTime)
+            stats[segment.speakerLabel] = (current.0 + 1, current.1 + segDur)
+        }
+        return stats.map { (key, value) in
+            (speaker: key, count: value.count, duration: value.duration)
+        }.sorted { $0.duration > $1.duration }
     }
 
     var body: some View {
@@ -53,13 +67,20 @@ struct ReviewingView: View {
                                     ForEach(viewModel.transcriptSegments.filter { $0.isFinal }) { segment in
                                         TranscriptBubble(
                                             segment: segment,
-                                            isActive: segment.id == activeSegmentId,
+                                            isActive: segment.id == activeSegmentId || segment.speakerLabel == selectedHighlightSpeaker,
                                             attendees: editedAttendeesList, // 传入参会人列表打通快捷说话人重命名
+                                            contacts: databaseManager.fetchAllContacts().map { $0.name },
                                             onTextChange: { newText in
                                                 viewModel.updateSegmentText(id: segment.id, newText: newText)
                                             },
                                             onSpeakerChange: { newSpeaker in
                                                 viewModel.updateSpeakerLabel(id: segment.id, newLabel: newSpeaker)
+                                            },
+                                            onPlay: {
+                                                playSegment(segment)
+                                            },
+                                            onSplit: { text1, text2, newSpeaker in
+                                                viewModel.splitSegment(id: segment.id, text1: text1, text2: text2, newSpeakerForPart2: newSpeaker)
                                             }
                                         )
                                         .id(segment.id)
@@ -114,7 +135,12 @@ struct ReviewingView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    NavigationLink(destination: GlobalSpeakerListView()) {
+                        Label("声纹字典", systemImage: "person.3.sequence")
+                    }
+                    .help("管理全局声纹人脉库")
+                    
                     Button {
                         withAnimation {
                             showInspector.toggle()
@@ -321,9 +347,25 @@ struct ReviewingView: View {
                     // 5. 说话人匹配
                     VStack(alignment: .leading, spacing: 6) {
                         Divider().padding(.vertical, 4)
-                        Text("说话人匹配")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            Text("说话人匹配")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            NavigationLink(destination: GlobalSpeakerListView()) {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "person.3.sequence.fill")
+                                    Text("管理字典")
+                                }
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(.purple.opacity(0.1))
+                                .foregroundStyle(.purple)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                         
                         let uniqueSpeakers = viewModel.uniqueSpeakers
                         if uniqueSpeakers.isEmpty {
@@ -363,6 +405,53 @@ struct ReviewingView: View {
                                     .buttonStyle(.plain)
                                 }
                                 .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    
+                    // 6. 声纹发言统计
+                    VStack(alignment: .leading, spacing: 6) {
+                        Divider().padding(.vertical, 4)
+                        Text("声纹发言统计")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        let stats = speakerStats
+                        if stats.isEmpty {
+                            Text("暂无发言统计")
+                                .font(.subheadline)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            ForEach(stats, id: \.speaker) { item in
+                                Button {
+                                    if selectedHighlightSpeaker == item.speaker {
+                                        selectedHighlightSpeaker = nil
+                                    } else {
+                                        selectedHighlightSpeaker = item.speaker
+                                    }
+                                } label: {
+                                    HStack {
+                                        Text(item.speaker)
+                                            .font(.subheadline)
+                                            .fontWeight(selectedHighlightSpeaker == item.speaker ? .bold : .regular)
+                                            .foregroundStyle(selectedHighlightSpeaker == item.speaker ? .purple : .primary)
+                                            .lineLimit(1)
+                                        
+                                        Spacer()
+                                        
+                                        Text("\(item.count)句 | \(String(format: "%.1f", item.duration))s")
+                                            .font(.caption)
+                                            .monospacedDigit()
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(selectedHighlightSpeaker == item.speaker ? Color.purple.opacity(0.15) : Color.clear)
+                                    )
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -541,7 +630,8 @@ struct ReviewingView: View {
             }
         }
         
-        // 进度跳转
+        // 进度跳转，并设定终止时间
+        viewModel.audioPlayer.playbackEndTime = segment.endTime
         viewModel.audioPlayer.seek(to: segment.startTime)
         
         // 如果当前未播放，则自动播放

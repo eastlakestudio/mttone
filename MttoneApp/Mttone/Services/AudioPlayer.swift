@@ -121,12 +121,21 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
         currentTime = time
     }
     
+    var playbackEndTime: TimeInterval?
+    
     // MARK: - 定时器相关
     
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self = self, let player = self.player else { return }
             self.currentTime = player.currentTime
+            
+            // 自动播放终止逻辑（对应切片片段回放）
+            if let endTime = self.playbackEndTime, self.currentTime >= endTime {
+                self.pause()
+                self.playbackEndTime = nil
+                return
+            }
             
             // 更新音量分贝
             player.updateMeters()

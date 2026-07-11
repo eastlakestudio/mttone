@@ -313,6 +313,7 @@ final class RecordingViewModel {
                 endTime: clip.endTime,
                 text: clip.originalText,
                 speakerLabel: clip.speakerLabel,
+                contactId: clip.contactId,
                 isFinal: true
             )
         }
@@ -327,7 +328,7 @@ final class RecordingViewModel {
                     id: segment.id,
                     meetingId: meetingId,
                     speakerLabel: segment.speakerLabel,
-                    contactId: nil,
+                    contactId: segment.contactId,
                     startTime: segment.startTime,
                     endTime: segment.endTime,
                     originalText: segment.text,
@@ -349,6 +350,69 @@ final class RecordingViewModel {
         }
     }
 
+    /// 拆分气泡片段并分配说话人
+    func splitSegment(id: String, text1: String, text2: String, newSpeakerForPart2: String? = nil) {
+        guard let index = transcriptSegments.firstIndex(where: { $0.id == id }) else { return }
+        let original = transcriptSegments[index]
+        
+        let totalDuration = original.endTime - original.startTime
+        let totalChars = max(1, text1.count + text2.count)
+        let ratio = Double(text1.count) / Double(totalChars)
+        let splitTime = original.startTime + totalDuration * ratio
+        
+        var speaker2 = original.speakerLabel
+        var contactId2 = original.contactId
+        
+        if let newSpeaker = newSpeakerForPart2?.trimmingCharacters(in: .whitespaces), !newSpeaker.isEmpty {
+            speaker2 = newSpeaker
+            var contact = databaseManager.fetchContact(byName: newSpeaker)
+            if contact == nil {
+                let newContact = Contact.create(name: newSpeaker)
+                try? databaseManager.saveContact(newContact)
+                contact = newContact
+            }
+            contactId2 = contact?.id
+        }
+        
+        let seg1 = TranscriptSegment(
+            id: UUID().uuidString,
+            startTime: original.startTime,
+            endTime: splitTime,
+            text: text1,
+            speakerLabel: original.speakerLabel,
+            contactId: original.contactId,
+            isFinal: original.isFinal
+        )
+        
+        let seg2 = TranscriptSegment(
+            id: UUID().uuidString,
+            startTime: splitTime,
+            endTime: original.endTime,
+            text: text2,
+            speakerLabel: speaker2,
+            contactId: contactId2,
+            isFinal: original.isFinal
+        )
+        
+        // 更新内存数组
+        transcriptSegments.remove(at: index)
+        transcriptSegments.insert(seg2, at: index)
+        transcriptSegments.insert(seg1, at: index)
+        
+        // 同步持久化到数据库
+        if let meetingId = currentMeeting?.id {
+            // 转为 SpeechClip 进行更新
+            let clip1 = SpeechClip(id: seg1.id, meetingId: meetingId, speakerLabel: seg1.speakerLabel, contactId: seg1.contactId, startTime: seg1.startTime, endTime: seg1.endTime, originalText: seg1.text, cleanedText: nil, audioClipPath: nil, isKeyClip: false)
+            let clip2 = SpeechClip(id: seg2.id, meetingId: meetingId, speakerLabel: seg2.speakerLabel, contactId: seg2.contactId, startTime: seg2.startTime, endTime: seg2.endTime, originalText: seg2.text, cleanedText: nil, audioClipPath: nil, isKeyClip: false)
+            
+            do {
+                try databaseManager.splitSpeechClip(oldClipId: original.id, newClip1: clip1, newClip2: clip2)
+            } catch {
+                print("[RecordingViewModel] ERROR: Failed to split segment in db: \(error)")
+            }
+        }
+    }
+
     /// 获取当前所有片段中出现的不重复说话人列表
     var uniqueSpeakers: [String] {
         var speakers = Set<String>()
@@ -359,11 +423,14 @@ final class RecordingViewModel {
     }
 
     /// 全局重命名说话人（并同步更新所有相关片段）
-    func globalRenameSpeaker(oldName: String, newName: String) {
+    func globalRenameSpeaker(oldName: String, newName: String, contactId: String? = nil) {
         guard oldName != newName else { return }
         for i in 0..<transcriptSegments.count {
             if transcriptSegments[i].speakerLabel == oldName {
                 transcriptSegments[i].speakerLabel = newName
+                if let cid = contactId {
+                    transcriptSegments[i].contactId = cid
+                }
             }
         }
     }
@@ -372,8 +439,38 @@ final class RecordingViewModel {
     func updateSpeakerLabel(id: String, newLabel: String) {
         if let index = transcriptSegments.firstIndex(where: { $0.id == id }) {
             let oldLabel = transcriptSegments[index].speakerLabel
-            // 全局替换：把所有旧 label 都换成新的
-            globalRenameSpeaker(oldName: oldLabel, newName: newLabel)
+            
+            // 查找或创建 Contact
+            var contact = databaseManager.fetchContact(byName: newLabel)
+            if contact == nil {
+                contact = Contact.create(name: newLabel)
+                do {
+                    try databaseManager.saveContact(contact!)
+                } catch {
+                    print("[RecordingViewModel] ERROR saving contact: \(error)")
+                }
+            }
+            
+            // 全局替换：把所有旧 label 都换成新的，并注入 contactId
+            globalRenameSpeaker(oldName: oldLabel, newName: newLabel, contactId: contact?.id)
+            
+            // 批量更新数据库中对应 meeting 的所有旧 label 相关的 speech_clips，并挂载 contactId
+            if let meetingId = currentMeeting?.id, let contactId = contact?.id {
+                let clips = databaseManager.fetchSpeechClips(meetingId: meetingId)
+                for clip in clips {
+                    if clip.speakerLabel == oldLabel || clip.speakerLabel == newLabel {
+                        // 更新 clip 数据库记录的联系人和标签
+                        var updatedClip = clip
+                        updatedClip.speakerLabel = newLabel
+                        updatedClip.contactId = contactId
+                        do {
+                            // 为了简化，由于我们没有批量更新方法，这里我们可以重用插入（假设 SQLite 支持 ON CONFLICT REPLACE，或者我们可以单独提供 update方法）
+                            // 实际上没有单独更新 clip 的简单方法，暂时可以依赖最终的 saveSegmentsToDatabase，但它可能没有存储 contactId。
+                            // 让我们在 saveSegmentsToDatabase 中处理 contactId！
+                        }
+                    }
+                }
+            }
         }
     }
 

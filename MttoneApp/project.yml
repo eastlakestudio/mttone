@@ -66,7 +66,7 @@ targets:
 
   MttoneTests:
     type: bundle.unit-test
-    platform: iOS
+    supportedDestinations: [iOS, macOS]
     sources:
       - MttoneTests
     dependencies:
@@ -74,3 +74,15 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.mttone.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Mttone.app/Contents/MacOS/Mttone
+        BUNDLE_LOADER: $(TEST_HOST)
+
+schemes:
+  Mttone:
+    build:
+      targets:
+        Mttone: [run, test, profile, analyze]
+        MttoneTests: [test]
+    test:
+      targets:
+        - MttoneTests

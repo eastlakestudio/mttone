@@ -137,6 +137,7 @@ struct TranscriptSegment: Identifiable, Hashable {
     let endTime: Double
     var text: String
     var speakerLabel: String
+    var contactId: String?
     var isFinal: Bool       // 是否为最终结果（非中间识别）
 
     var formattedTime: String {
