@@ -224,8 +224,14 @@ struct NewMeetingSheet: View {
                         .buttonStyle(.plain)
                         
                         Button {
-                            viewModel.recordingMode = .importFile
-                            isImporting = true
+                            if viewModel.recordingMode != .importFile {
+                                viewModel.recordingMode = .importFile
+                                DispatchQueue.main.async {
+                                    isImporting = true
+                                }
+                            } else {
+                                isImporting = true
+                            }
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "doc.fill")
@@ -251,15 +257,11 @@ struct NewMeetingSheet: View {
                 }
 
                 // 5. 延续历史会议
-                Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
-                    .font(.subheadline)
+                HStack(spacing: 8) {
+                    Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
+                        .font(.subheadline)
 
-                if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
-                    HStack {
-                        Text("关联父会议")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
+                    if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
                         Picker("", selection: $viewModel.selectedParentMeetingId) {
                             ForEach(recentMeetings, id: \.id) { meeting in
                                 Text(meeting.title).tag(String?.some(meeting.id))
@@ -267,8 +269,8 @@ struct NewMeetingSheet: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
+                        .frame(maxWidth: 180)
                     }
-                    .padding(.top, 4)
                 }
             }
             .padding()
