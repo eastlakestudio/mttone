@@ -107,15 +107,26 @@ struct SpeechClip: Identifiable, Codable, Hashable {
 struct Contact: Identifiable, Codable, Hashable {
     let id: String
     var name: String
+    var role: String?
+    var company: String?
     var avatarUrl: String?
     var createdAt: Date
     var updatedAt: Date
 
-    static func create(name: String) -> Contact {
+    var displayName: String {
+        if let c = company, !c.isEmpty {
+            return "\(name) (\(c))"
+        }
+        return name
+    }
+
+    static func create(name: String, role: String? = nil, company: String? = nil) -> Contact {
         let now = Date()
         return Contact(
             id: UUID().uuidString,
             name: name,
+            role: role,
+            company: company,
             avatarUrl: nil,
             createdAt: now,
             updatedAt: now

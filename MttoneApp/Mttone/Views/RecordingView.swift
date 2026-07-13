@@ -4,6 +4,8 @@ import SwiftUI
 struct RecordingView: View {
     @Bindable var viewModel: RecordingViewModel
     @State private var showInspector = false
+    @State private var dummyFilter: String? = nil
+    @State private var dummyAttendees: String = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -16,7 +18,7 @@ struct RecordingView: View {
 
             if showInspector {
                 Divider()
-                MeetingInfoSidebar(viewModel: viewModel, showSpeakerSections: false)
+                MeetingInfoSidebar(viewModel: viewModel, filterSpeaker: $dummyFilter, attendeesString: $dummyAttendees, showSpeakerSections: false)
                     .frame(width: 260)
             }
         }

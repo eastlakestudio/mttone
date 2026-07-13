@@ -280,6 +280,37 @@ final class RecordingViewModel {
     }
 
     /// 更新当前会议的元数据并写入数据库 (非模态修改用)
+    func addAttendee(_ name: String) {
+        guard var meeting = currentMeeting else {
+            print("[VM] addAttendee FAILED: currentMeeting is nil")
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let current = meeting.attendees ?? ""
+        var list = current.isEmpty ? [] : current.split(separator: " ").map(String.init)
+        guard !list.contains(trimmed) else {
+            print("[VM] addAttendee SKIP: \(trimmed) already in list (\(current))")
+            return
+        }
+        list.append(trimmed)
+        let newList = list.joined(separator: " ")
+        meeting.attendees = newList
+        currentMeeting = meeting
+        do {
+            try databaseManager.updateMeetingInfo(
+                id: meeting.id,
+                title: meeting.title,
+                location: meeting.location,
+                createdAt: meeting.createdAt,
+                attendees: newList
+            )
+            print("[VM] addAttendee DONE: \(trimmed) → list: \(newList)")
+        } catch {
+            print("[VM] addAttendee DB FAILED: \(error)")
+        }
+    }
+
     func updateMeetingMetadata(title: String, location: String?, createdAt: Date, attendees: String, duration: Int? = nil) {
         guard var meeting = currentMeeting else { return }
         meeting.title = title

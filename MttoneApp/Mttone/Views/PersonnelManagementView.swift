@@ -1,0 +1,253 @@
+import SwiftUI
+
+struct PersonGroupedClips: Identifiable {
+    let id = UUID()
+    let meeting: Meeting
+    let clips: [SpeechClip]
+}
+
+struct PersonnelManagementView: View {
+    @Environment(DatabaseManager.self) private var db
+    @State private var contacts: [Contact] = []
+    @State private var showAddSheet = false
+    @State private var editContact: Contact?
+    @State private var selectedContact: Contact?
+    @State private var groupedClips: [PersonGroupedClips] = []
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // 左列：人员列表 + 属性
+            leftColumn
+                .frame(width: 280)
+
+            Divider()
+
+            // 右列：发言记录
+            rightColumn
+                .frame(maxWidth: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { contacts = db.fetchAllContacts() }
+        .sheet(isPresented: $showAddSheet) {
+            ContactEditView(onSave: { contact in
+                try? db.saveContact(contact)
+                contacts = db.fetchAllContacts()
+                showAddSheet = false
+            }, onCancel: { showAddSheet = false })
+        }
+        .sheet(item: $editContact) { contact in
+            ContactEditView(existing: contact, onSave: { updated in
+                try? db.saveContact(updated)
+                contacts = db.fetchAllContacts()
+                editContact = nil
+            }, onCancel: { editContact = nil })
+        }
+    }
+
+    // MARK: - 左列
+
+    private var leftColumn: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("人员列表").font(.headline)
+                Spacer()
+                Button { showAddSheet = true } label: {
+                    Image(systemName: "person.badge.plus").foregroundStyle(.purple)
+                }.buttonStyle(.plain).help("添加人员")
+            }.padding()
+
+            Divider()
+
+            if contacts.isEmpty {
+                VStack(spacing: 8) {
+                    Text("暂无人员").font(.subheadline).foregroundStyle(.secondary)
+                }.frame(maxHeight: .infinity)
+            } else {
+                List(contacts, id: \.id) { contact in
+                    Button {
+                        selectedContact = contact
+                        let items = db.fetchSpeechClipsGroupedByMeeting(forContact: contact.id)
+                        groupedClips = items.map { PersonGroupedClips(meeting: $0.meeting, clips: $0.clips) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(personColor(contact.name))
+                                .frame(width: 24, height: 24)
+                                .overlay(Text(String(contact.name.prefix(1))).font(.caption2).foregroundStyle(.white))
+                            Text(contact.name).font(.subheadline)
+                                .foregroundStyle(selectedContact?.id == contact.id ? .purple : .primary)
+                            Spacer()
+                            if let company = contact.company {
+                                Text(company).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button { editContact = contact } label: {
+                            Label("编辑", systemImage: "pencil")
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
+            }
+
+            // 属性面板
+            if let contact = selectedContact {
+                Divider()
+                attributePanel(contact)
+            }
+        }
+        .background(.regularMaterial)
+    }
+
+    private func attributePanel(_ contact: Contact) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("人员属性").font(.caption).foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                HStack {
+                    Text("姓名").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                    Text(contact.name).font(.subheadline)
+                    Spacer()
+                }
+                HStack {
+                    Text("角色").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                    Text(contact.role ?? "—").font(.subheadline)
+                        .foregroundStyle(contact.role != nil ? .purple : .secondary)
+                    Spacer()
+                }
+                HStack {
+                    Text("组织").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                    Text(contact.company ?? "—").font(.subheadline)
+                        .foregroundStyle(contact.company != nil ? .primary : .secondary)
+                    Spacer()
+                }
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+    }
+
+    // MARK: - 右列
+
+    private var rightColumn: some View {
+        VStack(spacing: 0) {
+            if let contact = selectedContact {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(contact.name).font(.headline)
+                        if let role = contact.role {
+                            Text(role).font(.caption).foregroundStyle(.purple)
+                        }
+                    }
+                    Spacer()
+                    Text("\(groupedClips.reduce(0) { $0 + $1.clips.count }) 条发言 · \(groupedClips.count) 场会议")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding()
+            } else {
+                HStack {
+                    Text("发言记录").font(.headline)
+                    Spacer()
+                    Text("请从左侧选择人员").font(.caption).foregroundStyle(.secondary)
+                }.padding()
+            }
+
+            Divider()
+
+            if groupedClips.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "waveform").font(.largeTitle).foregroundStyle(.quaternary)
+                    Text("暂无发言记录").font(.subheadline).foregroundStyle(.secondary)
+                }.frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(groupedClips) { group in
+                            VStack(alignment: .leading, spacing: 0) {
+                                // 会议标题头
+                                HStack {
+                                    Image(systemName: "calendar")
+                                        .font(.caption).foregroundStyle(.purple)
+                                    Text(group.meeting.title)
+                                        .font(.subheadline).fontWeight(.semibold)
+                                    Spacer()
+                                    Text(formatDate(group.meeting.createdAt))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(.purple.opacity(0.06))
+
+                                // 该会议的发言片段
+                                ForEach(group.clips, id: \.id) { clip in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(clip.cleanedText ?? clip.originalText)
+                                            .font(.body)
+                                        HStack {
+                                            Text(formatTime(clip.startTime))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                    Text("· \(String(format: "%.1f", clip.endTime - clip.startTime))s")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                            Spacer()
+                                        }
+                                    }
+                                    .padding(.horizontal, 20).padding(.vertical, 6)
+                                    Divider().padding(.leading, 20)
+                                }
+                            }
+                            .background(.regularMaterial.opacity(0.3))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func personColor(_ name: String) -> Color {
+        let c: [Color] = [.purple, .blue, .orange, .green, .pink, .teal, .indigo, .mint]
+        return c[abs(name.hashValue) % c.count]
+    }
+
+    private func formatTime(_ t: Double) -> String {
+        let m = Int(t)/60, s = Int(t)%60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+}
+
+struct ContactEditView: View {
+    var existing: Contact?
+    var onSave: (Contact) -> Void
+    var onCancel: () -> Void
+    @State private var name = ""
+    @State private var role = ""
+    @State private var company = ""
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(existing != nil ? "编辑人员" : "添加人员").font(.headline)
+            TextField("姓名", text: $name).textFieldStyle(.roundedBorder)
+            TextField("角色（可选）", text: $role).textFieldStyle(.roundedBorder)
+            TextField("公司（可选）", text: $company).textFieldStyle(.roundedBorder)
+            HStack(spacing: 12) {
+                Button("取消") { onCancel() }.controlSize(.large); Spacer()
+                Button("保存") {
+                    let n = name.trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty else { return }
+                    onSave(Contact(id: existing?.id ?? UUID().uuidString, name: n,
+                        role: role.trimmingCharacters(in: .whitespaces).isEmpty ? nil : role.trimmingCharacters(in: .whitespaces),
+                        company: company.trimmingCharacters(in: .whitespaces).isEmpty ? nil : company.trimmingCharacters(in: .whitespaces),
+                        avatarUrl: existing?.avatarUrl, createdAt: existing?.createdAt ?? Date(), updatedAt: Date()))
+                }.buttonStyle(.borderedProminent).tint(.purple).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty).controlSize(.large)
+            }
+        }.padding().frame(width: 320)
+        .onAppear { if let c = existing { name = c.name; role = c.role ?? ""; company = c.company ?? "" } }
+    }
+}

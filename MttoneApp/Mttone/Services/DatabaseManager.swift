@@ -44,6 +44,8 @@ final class DatabaseManager {
         CREATE TABLE IF NOT EXISTS contacts (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            role TEXT,
+            company TEXT,
             avatar_url TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
@@ -119,6 +121,28 @@ final class DatabaseManager {
             if !hasAttendees {
                 sqlite3_exec(db, "ALTER TABLE meetings ADD COLUMN attendees TEXT;", nil, nil, nil)
                 print("[DB] Added attendees column to meetings table successfully.")
+            }
+
+            // 增量检查 contacts 表的 role / company 字段
+            let checkContactSql = "PRAGMA table_info(contacts);"
+            var contactStmt: OpaquePointer?
+            var hasRole = false, hasCompany = false
+            if sqlite3_prepare_v2(db, checkContactSql, -1, &contactStmt, nil) == SQLITE_OK {
+                while sqlite3_step(contactStmt) == SQLITE_ROW {
+                    if let n = columnOptionalText(contactStmt, index: 1) {
+                        if n == "role" { hasRole = true }
+                        if n == "company" { hasCompany = true }
+                    }
+                }
+                sqlite3_finalize(contactStmt)
+            }
+            if !hasRole {
+                sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN role TEXT;", nil, nil, nil)
+                print("[DB] Added role column to contacts table.")
+            }
+            if !hasCompany {
+                sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN company TEXT;", nil, nil, nil)
+                print("[DB] Added company column to contacts table.")
             }
         }
     }
@@ -496,6 +520,57 @@ final class DatabaseManager {
         }
     }
 
+    func fetchSpeechClipsGroupedByMeeting(forContact contactId: String) -> [(meeting: Meeting, clips: [SpeechClip])] {
+        let clipsSQL = """
+        SELECT sc.id, sc.meeting_id, sc.speaker_label, sc.contact_id, sc.start_time, sc.end_time, 
+               sc.original_text, sc.cleaned_text, sc.audio_clip_path, sc.is_key_clip, sc.created_at,
+               m.title, m.created_at as meeting_created
+        FROM speech_clips sc
+        JOIN meetings m ON m.id = sc.meeting_id
+        WHERE sc.contact_id = ?
+        ORDER BY m.created_at DESC, sc.start_time ASC
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, clipsSQL, -1, &stmt, nil) == SQLITE_OK else {
+            print("[DB] ERROR: \(lastError)")
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, contactId.cString, -1, SQLITE_TRANSIENT)
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var groups: [String: (meeting: Meeting, clips: [SpeechClip])] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = columnText(stmt, index: 0)
+            let meetingId = columnText(stmt, index: 1)
+            let speaker = columnText(stmt, index: 2)
+            let cid = columnOptionalText(stmt, index: 3)
+            let start = sqlite3_column_double(stmt, 4)
+            let end = sqlite3_column_double(stmt, 5)
+            let text = columnText(stmt, index: 6)
+            let cleaned = columnOptionalText(stmt, index: 7)
+            let path = columnOptionalText(stmt, index: 8)
+            let isKey = sqlite3_column_int(stmt, 9) != 0
+            let title = columnText(stmt, index: 11)
+            let meetingCreated = dateFormatter.date(from: columnText(stmt, index: 12)) ?? Date()
+
+            let clip = SpeechClip(id: id, meetingId: meetingId, speakerLabel: speaker, contactId: cid,
+                                   startTime: start, endTime: end, originalText: text, cleanedText: cleaned,
+                                   audioClipPath: path, isKeyClip: isKey)
+
+            if groups[meetingId] == nil {
+                let meeting = Meeting(id: meetingId, parentMeetingId: nil, title: title,
+                                      location: nil, audioPath: "", duration: 0, status: .completed,
+                                      summary: nil, createdAt: meetingCreated, updatedAt: meetingCreated)
+                groups[meetingId] = (meeting: meeting, clips: [])
+            }
+            groups[meetingId]?.clips.append(clip)
+        }
+        return groups.values.sorted { $0.meeting.createdAt > $1.meeting.createdAt }
+    }
+
     func fetchSpeechClips(forContact contactId: String) -> [SpeechClip] {
         let sql = "SELECT id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at FROM speech_clips WHERE contact_id = ? ORDER BY start_time ASC"
         var stmt: OpaquePointer?
@@ -603,7 +678,7 @@ final class DatabaseManager {
     // MARK: - Contacts CRUD
     
     func fetchAllContacts() -> [Contact] {
-        let sql = "SELECT id, name, avatar_url, created_at, updated_at FROM contacts ORDER BY created_at DESC"
+        let sql = "SELECT id, name, role, company, avatar_url, created_at, updated_at FROM contacts ORDER BY name ASC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             return []
@@ -617,21 +692,25 @@ final class DatabaseManager {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = columnText(stmt, index: 0)
             let name = columnText(stmt, index: 1)
-            let avatar = columnOptionalText(stmt, index: 2)
-            let created = dateFormatter.date(from: columnText(stmt, index: 3)) ?? Date()
-            let updated = dateFormatter.date(from: columnText(stmt, index: 4)) ?? Date()
+            let role = columnOptionalText(stmt, index: 2)
+            let company = columnOptionalText(stmt, index: 3)
+            let avatar = columnOptionalText(stmt, index: 4)
+            let created = dateFormatter.date(from: columnText(stmt, index: 5)) ?? Date()
+            let updated = dateFormatter.date(from: columnText(stmt, index: 6)) ?? Date()
             
-            contacts.append(Contact(id: id, name: name, avatarUrl: avatar, createdAt: created, updatedAt: updated))
+            contacts.append(Contact(id: id, name: name, role: role, company: company, avatarUrl: avatar, createdAt: created, updatedAt: updated))
         }
         return contacts
     }
     
     func saveContact(_ contact: Contact) throws {
         let sql = """
-        INSERT INTO contacts (id, name, avatar_url, created_at, updated_at) 
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO contacts (id, name, role, company, avatar_url, created_at, updated_at) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET 
             name = excluded.name, 
+            role = excluded.role,
+            company = excluded.company,
             avatar_url = excluded.avatar_url, 
             updated_at = excluded.updated_at
         """
@@ -646,9 +725,11 @@ final class DatabaseManager {
         
         sqlite3_bind_text(stmt, 1, contact.id.cString, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(stmt, 2, contact.name.cString, -1, SQLITE_TRANSIENT)
-        bindOptionalText(stmt, index: 3, value: contact.avatarUrl)
-        sqlite3_bind_text(stmt, 4, dateFormatter.string(from: contact.createdAt).cString, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(stmt, 5, dateFormatter.string(from: contact.updatedAt).cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 3, value: contact.role)
+        bindOptionalText(stmt, index: 4, value: contact.company)
+        bindOptionalText(stmt, index: 5, value: contact.avatarUrl)
+        sqlite3_bind_text(stmt, 6, dateFormatter.string(from: contact.createdAt).cString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 7, dateFormatter.string(from: contact.updatedAt).cString, -1, SQLITE_TRANSIENT)
         
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DBError.executeFailed(lastError)
@@ -656,7 +737,7 @@ final class DatabaseManager {
     }
     
     func fetchContact(byName name: String) -> Contact? {
-        let sql = "SELECT id, name, avatar_url, created_at, updated_at FROM contacts WHERE name = ? LIMIT 1"
+        let sql = "SELECT id, name, role, company, avatar_url, created_at, updated_at FROM contacts WHERE name = ? LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             return nil
@@ -671,11 +752,13 @@ final class DatabaseManager {
         if sqlite3_step(stmt) == SQLITE_ROW {
             let id = columnText(stmt, index: 0)
             let fetchedName = columnText(stmt, index: 1)
-            let avatar = columnOptionalText(stmt, index: 2)
-            let created = dateFormatter.date(from: columnText(stmt, index: 3)) ?? Date()
-            let updated = dateFormatter.date(from: columnText(stmt, index: 4)) ?? Date()
+            let role = columnOptionalText(stmt, index: 2)
+            let company = columnOptionalText(stmt, index: 3)
+            let avatar = columnOptionalText(stmt, index: 4)
+            let created = dateFormatter.date(from: columnText(stmt, index: 5)) ?? Date()
+            let updated = dateFormatter.date(from: columnText(stmt, index: 6)) ?? Date()
             
-            return Contact(id: id, name: fetchedName, avatarUrl: avatar, createdAt: created, updatedAt: updated)
+            return Contact(id: id, name: fetchedName, role: role, company: company, avatarUrl: avatar, createdAt: created, updatedAt: updated)
         }
         return nil
     }

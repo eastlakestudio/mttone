@@ -6,6 +6,8 @@ struct ReviewingView: View {
     @Environment(DatabaseManager.self) private var databaseManager
     @State private var activeSegmentId: String? = nil
     @State private var showInspector = true
+    @State private var filterSpeaker: String? = nil
+    @State private var attendeesString: String = ""
 
     private var editedAttendeesList: [String] {
         let s = viewModel.currentMeeting?.attendees ?? ""
@@ -35,7 +37,7 @@ struct ReviewingView: View {
 
                 if showInspector {
                     Divider()
-                    MeetingInfoSidebar(viewModel: viewModel, showSpeakerSections: true)
+                    MeetingInfoSidebar(viewModel: viewModel, filterSpeaker: $filterSpeaker, attendeesString: $attendeesString, showSpeakerSections: true)
                         .frame(width: 260)
                         .transition(.move(edge: .trailing))
                 }
@@ -51,10 +53,9 @@ struct ReviewingView: View {
             #endif
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    NavigationLink(destination: GlobalSpeakerListView()) {
-                        Label("声纹字典", systemImage: "person.3.sequence")
-                    }
-                    .help("管理全局声纹人脉库")
+                    NavigationLink(destination: PersonnelManagementView()) {
+                        Label("人员与声纹", systemImage: "person.3.sequence")
+                    }.help("全局人员与声纹管理")
 
                     Button {
                         withAnimation { showInspector.toggle() }
@@ -71,7 +72,31 @@ struct ReviewingView: View {
                     .fontWeight(.bold)
                 }
             }
+            .onAppear {
+                attendeesString = viewModel.currentMeeting?.attendees ?? ""
+            }
+            .onChange(of: viewModel.transcriptSegments.map(\.speakerLabel)) { _, labels in
+                for label in labels {
+                    addAttendeeFromLabel(label)
+                }
+            }
         }
+    }
+
+    private func addAttendeeFromLabel(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let current = attendeesString
+        var list = current.isEmpty ? [] : current.split(separator: " ").map(String.init)
+        guard !list.contains(trimmed) else {
+            try? "[Mttone] SKIP: \(trimmed) already in '\(current)'".write(toFile: "/tmp/mttone_debug.log", atomically: true, encoding: .utf8)
+            return
+        }
+        list.append(trimmed)
+        let newList = list.joined(separator: " ")
+        attendeesString = newList
+        viewModel.addAttendee(trimmed)
+        try? "[Mttone] DONE: \(trimmed) → '\(newList)' (attendeesString now: \(attendeesString))".write(toFile: "/tmp/mttone_debug.log", atomically: true, encoding: .utf8)
     }
 
     // MARK: - 空白文本加载视图
@@ -139,9 +164,18 @@ struct ReviewingView: View {
     private var transcriptList: some View {
         UnifiedTranscriptEditor(
             segments: $viewModel.transcriptSegments,
-            attendees: editedAttendeesList,
+            filterSpeaker: $filterSpeaker,
+            activeSegmentId: $activeSegmentId,
+            meetingAttendees: $attendeesString,
             contacts: databaseManager.fetchAllContacts().map { $0.name },
-            onPlaySegment: { seg in playSegment(seg) }
+            onPlaySegment: { seg in playSegment(seg) },
+            onSpeakerChanged: { segId, newSpeaker in
+                try? "[Mttone] onSpeakerChanged: \(segId) → \(newSpeaker)".write(toFile: "/tmp/mttone_debug.log", atomically: true, encoding: .utf8)
+                if let idx = viewModel.transcriptSegments.firstIndex(where: { $0.id == segId }) {
+                    viewModel.transcriptSegments[idx].speakerLabel = newSpeaker
+                }
+                addAttendeeFromLabel(newSpeaker)
+            }
         )
         .padding()
     }
@@ -269,5 +303,9 @@ struct ReviewingView: View {
         if !viewModel.audioPlayer.isPlaying {
             viewModel.audioPlayer.resume()
         }
+    }
+
+    private func addAttendeeFromTranscript(_ name: String) {
+        viewModel.addAttendee(name)
     }
 }

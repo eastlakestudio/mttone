@@ -101,7 +101,7 @@ struct MeetingListView: View {
                 
             Spacer()
             
-            NavigationLink(destination: GlobalSpeakerListView()) {
+            NavigationLink(destination: PersonnelManagementView()) {
                 HStack(spacing: 4) {
                     Image(systemName: "person.3.sequence.fill")
                     Text("声纹字典")
