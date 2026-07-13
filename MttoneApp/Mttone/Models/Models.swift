@@ -50,7 +50,6 @@ extension Meeting {
     var localAudioURL: URL {
         let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         
-        // 1. 如果存储的 audioPath 里面含有文件名，提取文件名
         if !audioPath.isEmpty {
             let lastPathComponent = URL(fileURLWithPath: audioPath).lastPathComponent
             let targetURL = docDir.appendingPathComponent(lastPathComponent)
@@ -59,7 +58,6 @@ extension Meeting {
             }
         }
         
-        // 2. 如果没有找到，做多后缀动态探测兜底
         let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
         for ext in allowedExts {
             let url = docDir.appendingPathComponent("audio_\(id).\(ext)")
@@ -68,8 +66,24 @@ extension Meeting {
             }
         }
         
-        // 3. 极速兜底：返回默认的 .wav
         return docDir.appendingPathComponent("audio_\(id).wav")
+    }
+
+    var audioFileExists: Bool {
+        FileManager.default.fileExists(atPath: localAudioURL.path)
+    }
+
+    var missingAudioReason: String? {
+        if audioFileExists { return nil }
+        let url = localAudioURL
+        let docDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let expectedName = "audio_\(id)"
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: docDir.path)) ?? []
+        let matching = files.filter { $0.hasPrefix(expectedName) || $0.contains(id) }
+        if matching.isEmpty {
+            return "录音文件未找到（\(expectedName).* 不存在于 Documents 目录）"
+        }
+        return "录音文件 \(url.lastPathComponent) 不存在，但发现相关文件: \(matching.joined(separator: ", "))"
     }
 }
 

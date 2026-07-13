@@ -481,6 +481,21 @@ final class DatabaseManager {
         return clips
     }
 
+    func updateSpeechClipContact(clipId: String, speakerLabel: String, contactId: String?) throws {
+        let sql = "UPDATE speech_clips SET speaker_label = ?, contact_id = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, speakerLabel.cString, -1, SQLITE_TRANSIENT)
+        bindOptionalText(stmt, index: 2, value: contactId)
+        sqlite3_bind_text(stmt, 3, clipId.cString, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+    }
+
     func fetchSpeechClips(forContact contactId: String) -> [SpeechClip] {
         let sql = "SELECT id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at FROM speech_clips WHERE contact_id = ? ORDER BY start_time ASC"
         var stmt: OpaquePointer?

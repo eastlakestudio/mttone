@@ -183,6 +183,10 @@ final class RecordingViewModel {
         runOfflineTranscription(for: meeting.id, audioURL: audioURL)
     }
 
+    func retryOfflineTranscription(for meetingId: String, audioURL: URL) {
+        runOfflineTranscription(for: meetingId, audioURL: audioURL)
+    }
+
     private func runOfflineTranscription(for meetingId: String, audioURL: URL) {
         isTranscribingOffline = true
         Task {
@@ -350,6 +354,36 @@ final class RecordingViewModel {
         }
     }
 
+    func mergeWithPrevious(segmentId: String) {
+        guard let index = transcriptSegments.firstIndex(where: { $0.id == segmentId }), index > 0 else { return }
+        let current = transcriptSegments[index]
+        let previous = transcriptSegments[index - 1]
+        guard current.speakerLabel == previous.speakerLabel else { return }
+
+        let merged = TranscriptSegment(
+            id: previous.id,
+            startTime: previous.startTime,
+            endTime: current.endTime,
+            text: previous.text + "\n" + current.text,
+            speakerLabel: previous.speakerLabel,
+            contactId: previous.contactId,
+            isFinal: true
+        )
+        transcriptSegments[index - 1] = merged
+        transcriptSegments.remove(at: index)
+    }
+
+    func updateLocalSpeakerLabel(id: String, newLabel: String) {
+        guard let index = transcriptSegments.firstIndex(where: { $0.id == id }) else { return }
+        var contact = databaseManager.fetchContact(byName: newLabel)
+        if contact == nil {
+            contact = Contact.create(name: newLabel)
+            try? databaseManager.saveContact(contact!)
+        }
+        transcriptSegments[index].speakerLabel = newLabel
+        transcriptSegments[index].contactId = contact?.id
+    }
+
     /// 拆分气泡片段并分配说话人
     func splitSegment(id: String, text1: String, text2: String, newSpeakerForPart2: String? = nil) {
         guard let index = transcriptSegments.firstIndex(where: { $0.id == id }) else { return }
@@ -440,7 +474,6 @@ final class RecordingViewModel {
         if let index = transcriptSegments.firstIndex(where: { $0.id == id }) {
             let oldLabel = transcriptSegments[index].speakerLabel
             
-            // 查找或创建 Contact
             var contact = databaseManager.fetchContact(byName: newLabel)
             if contact == nil {
                 contact = Contact.create(name: newLabel)
@@ -451,23 +484,17 @@ final class RecordingViewModel {
                 }
             }
             
-            // 全局替换：把所有旧 label 都换成新的，并注入 contactId
             globalRenameSpeaker(oldName: oldLabel, newName: newLabel, contactId: contact?.id)
             
-            // 批量更新数据库中对应 meeting 的所有旧 label 相关的 speech_clips，并挂载 contactId
-            if let meetingId = currentMeeting?.id, let contactId = contact?.id {
+            if let meetingId = currentMeeting?.id {
                 let clips = databaseManager.fetchSpeechClips(meetingId: meetingId)
                 for clip in clips {
                     if clip.speakerLabel == oldLabel || clip.speakerLabel == newLabel {
-                        // 更新 clip 数据库记录的联系人和标签
-                        var updatedClip = clip
-                        updatedClip.speakerLabel = newLabel
-                        updatedClip.contactId = contactId
-                        do {
-                            // 为了简化，由于我们没有批量更新方法，这里我们可以重用插入（假设 SQLite 支持 ON CONFLICT REPLACE，或者我们可以单独提供 update方法）
-                            // 实际上没有单独更新 clip 的简单方法，暂时可以依赖最终的 saveSegmentsToDatabase，但它可能没有存储 contactId。
-                            // 让我们在 saveSegmentsToDatabase 中处理 contactId！
-                        }
+                        try? databaseManager.updateSpeechClipContact(
+                            clipId: clip.id,
+                            speakerLabel: newLabel,
+                            contactId: contact?.id
+                        )
                     }
                 }
             }
