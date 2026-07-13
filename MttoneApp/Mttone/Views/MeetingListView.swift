@@ -2,6 +2,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+import AVFoundation
 
 /// 会议列表页（首页）
 struct MeetingListView: View {
@@ -147,8 +148,31 @@ struct MeetingListView: View {
                 let finalPath = meeting.localAudioURL.path
                 recordingVM.currentMeeting?.audioPath = finalPath
 
-                recordingVM.audioPlayer.duration = TimeInterval(meeting.duration)
+                let log = { (msg: String) in
+                    let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
+                    let line = "\(df.string(from: Date())) [Duration] \(msg)\n"
+                    if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                        h.seekToEndOfFile(); h.write(d); h.closeFile()
+                    }
+                }
+
+                log("打开会议: id=\(meeting.id), DB时长=\(meeting.duration)s, 音频路径=\(finalPath), 文件存在=\(FileManager.default.fileExists(atPath: finalPath))")
+
+                // 探测音频实际时长
+                var duration = TimeInterval(meeting.duration)
+                if let player = try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: finalPath)) {
+                    if player.duration > 0 {
+                        duration = player.duration
+                        log("AVAudioPlayer探测时长: \(Int(duration))s")
+                    } else {
+                        log("AVAudioPlayer返回时长=0")
+                    }
+                } else {
+                    log("AVAudioPlayer初始化失败")
+                }
+                recordingVM.audioPlayer.duration = duration
                 recordingVM.audioPlayer.currentTime = 0
+                log("最终设置 audioPlayer.duration = \(Int(duration))s")
 
                 recordingVM.loadSegmentsFromDatabase(meetingId: meeting.id)
                 recordingVM.meetingStatus = .reviewing
@@ -267,9 +291,9 @@ struct MeetingRow: View {
     private var statusText: String {
         switch meeting.status {
         case .recording: return "录音中"
-        case .pendingDiarization: return "待分离"
-        case .processingLlm: return "AI 处理中"
-        case .completed: return "已完成"
+        case .pendingDiarization: return "未分离"
+        case .processingLlm: return "分离未完成"
+        case .completed: return "完成分离"
         }
     }
 

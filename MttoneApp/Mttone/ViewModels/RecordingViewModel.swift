@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 /// 录音 ViewModel：协调 AudioRecorder、DatabaseManager 和 UI 状态
 @MainActor
@@ -45,6 +46,8 @@ final class RecordingViewModel {
     
     // 离线转写状态
     var isTranscribingOffline: Bool = false
+    var segmentCount: Int = 0
+    private var transcriptionTask: Task<Void, Never>?
     
     // 定时器
     private var durationTimer: Timer?
@@ -188,32 +191,108 @@ final class RecordingViewModel {
     }
 
     private func runOfflineTranscription(for meetingId: String, audioURL: URL) {
+        let log = { (msg: String) in
+            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
+            let line = "\(df.string(from: Date())) [VM] \(msg)\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            } else { try? line.write(toFile: "/tmp/mttone_diag.log", atomically: true, encoding: .utf8) }
+        }
+
+        transcriptionTask?.cancel()
+        log("转写任务启动: \(meetingId)")
+
+        try? databaseManager.updateMeetingStatus(id: meetingId, status: .processingLlm)
         isTranscribingOffline = true
-        Task {
-            do {
-                try await WhisperService.shared.initialize()
-                
-                async let whisperTask = WhisperService.shared.transcribe(audioURL: audioURL, meetingId: meetingId)
-                async let diarizationTask = DiarizationService.shared.diarize(audioURL: audioURL)
-                
-                let offlineSegments = try await whisperTask
-                let speakerSegments = try await diarizationTask
-                
-                let alignedSegments = self.alignSpeakerLabels(transcripts: offlineSegments, diarization: speakerSegments)
-                
-                await MainActor.run {
-                    if alignedSegments.isEmpty == false {
-                        self.transcriptSegments = alignedSegments
+
+        // 消息通道：后台生产 → 前台消费
+        let segmentQueue = DispatchQueue(label: "segment.q")
+        var pendingChunks: [[TranscriptSegment]] = []
+
+        // 共享变量：声纹分离结果（秒级完成）
+        let sharedDiar = UnsafeMutablePointer<[DiarizedSegment]?>.allocate(capacity: 1)
+        sharedDiar.initialize(to: nil)
+
+        // 前台消费者：每 0.3s 批量读取，如有声纹分离结果则即时对齐
+        let consumerTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            while !Task.isCancelled {
+                var batch: [TranscriptSegment] = []
+                segmentQueue.sync { batch = pendingChunks.flatMap { $0 }; pendingChunks = [] }
+                if !batch.isEmpty {
+                    var seen = Set(self.transcriptSegments.map(\.id))
+                    for seg in batch where !seen.contains(seg.id) {
+                        self.transcriptSegments.append(seg); seen.insert(seg.id)
                     }
+                    // 如果声纹分离已完成，立即对齐
+                    if let diar = sharedDiar.pointee, !diar.isEmpty {
+                        let aligned = self.alignSpeakerLabels(transcripts: self.transcriptSegments, diarization: diar)
+                        self.transcriptSegments = aligned.isEmpty ? self.transcriptSegments : aligned
+                    }
+                    self.segmentCount = self.transcriptSegments.count
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                if !self.isTranscribingOffline { break }
+            }
+        }
+
+        // 后台生产者
+        transcriptionTask = Task.detached { [weak self] in
+            guard let self = self else { return }
+            defer {
+                consumerTask.cancel()
+                Task { @MainActor [weak self] in self?.isTranscribingOffline = false }
+            }
+
+            do {
+                log("初始化模型...")
+                try await WhisperService.shared.initialize()
+                try Task.checkCancellation()
+
+                async let whisperTask = WhisperService.shared.transcribe(
+                    audioURL: audioURL, meetingId: meetingId,
+                    onSegments: { partialSegments in
+                        segmentQueue.async { pendingChunks.append(partialSegments) }
+                    }
+                )
+                // 声纹分离先跑（秒级完成），结果共享给消费者即时对齐
+                _ = Task {
+                    if let diar = try? await DiarizationService.shared.diarize(audioURL: audioURL) {
+                        sharedDiar.pointee = diar
+                        log("声纹分离完毕: \(diar.count) 区间, 存储到共享变量")
+                    }
+                }
+
+                log("正在并行执行转写+声纹分离...")
+                let offlineSegments = try await whisperTask
+                try Task.checkCancellation()
+                log("Whisper转写完毕: \(offlineSegments.count) 段")
+
+                // 关闭消费者，最终落库
+                consumerTask.cancel()
+                // 确保最终对齐（兜底）
+                if let diar = sharedDiar.pointee, !diar.isEmpty {
+                    _ = await self.alignSpeakerLabels(transcripts: offlineSegments, diarization: diar)
+                }
+
+                await MainActor.run { [weak self] in
+                    guard let self = self else { return }
+                    self.segmentCount = self.transcriptSegments.count
                     self.saveSegmentsToDatabase(meetingId: meetingId)
-                    self.isTranscribingOffline = false
+                    try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .completed)
+                    log("全部完成: meetingId=\(meetingId) status=completed")
+                }
+            } catch is CancellationError {
+                log("转写被用户中断")
+                await MainActor.run {
+                    try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .pendingDiarization)
                 }
             } catch {
-                print("[RecordingViewModel] 离线大模型转写失败: \(error)")
+                log("转写失败: \(error.localizedDescription)")
                 await MainActor.run {
                     self.errorAlert = "离线大模型转写/分离失败:\n\(error.localizedDescription)"
                     self.saveSegmentsToDatabase(meetingId: meetingId)
-                    self.isTranscribingOffline = false
+                    try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .pendingDiarization)
                 }
             }
         }
@@ -221,59 +300,66 @@ final class RecordingViewModel {
 
     func importAudioFile(from sourceURL: URL, title: String? = nil, location: String? = nil) async {
         let meetingId = UUID().uuidString
-        let ext = sourceURL.pathExtension.lowercased()
-        let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
-        guard allowedExts.contains(ext) else {
-            errorAlert = "不支持的音频格式: .\(ext)"
-            return
-        }
+            let ext = sourceURL.pathExtension.lowercased()
+            let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
+            guard allowedExts.contains(ext) else {
+                errorAlert = "不支持的音频格式: .\(ext)"
+                return
+            }
 
-        let destDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let destURL = destDir.appendingPathComponent("audio_\(meetingId).\(ext)")
+            let destDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            let destURL = destDir.appendingPathComponent("audio_\(meetingId).\(ext)")
 
-        do {
-            try FileManager.default.copyItem(at: sourceURL, to: destURL)
-        } catch {
-            errorAlert = "文件复制失败: \(error.localizedDescription)"
-            return
-        }
+            do {
+                try FileManager.default.copyItem(at: sourceURL, to: destURL)
+            } catch {
+                errorAlert = "文件复制失败: \(error.localizedDescription)"
+                return
+            }
 
-        let fileName = sourceURL.lastPathComponent
-        let meetingTitle = title ?? fileName.replacingOccurrences(
-            of: ".\(ext)", with: "",
-            options: .caseInsensitive
-        )
+            // 探测音频实际时长
+            var audioDuration = 0
+            if let player = try? AVAudioPlayer(contentsOf: destURL) {
+                audioDuration = Int(player.duration)
+            }
 
-        var parentId: String? = nil
-        if shouldExtendLastMeeting {
-            parentId = selectedParentMeetingId
-        }
+            let fileName = sourceURL.lastPathComponent
+            let meetingTitle = title ?? fileName.replacingOccurrences(
+                of: ".\(ext)", with: "",
+                options: .caseInsensitive
+            )
 
-        let meeting = Meeting(
-            id: meetingId,
-            parentMeetingId: parentId,
-            title: meetingTitle,
-            location: location ?? "外部导入",
-            audioPath: destURL.path,
-            duration: 0,
-            status: .pendingDiarization,
-            summary: nil,
-            createdAt: formCreatedAt,
-            updatedAt: formCreatedAt
-        )
+            var parentId: String? = nil
+            if shouldExtendLastMeeting {
+                parentId = selectedParentMeetingId
+            }
 
-        do {
-            try databaseManager.createMeeting(meeting)
-        } catch {
-            errorAlert = "创建会议失败: \(error.localizedDescription)"
-            try? FileManager.default.removeItem(at: destURL)
-            return
-        }
+            let meeting = Meeting(
+                id: meetingId,
+                parentMeetingId: parentId,
+                title: meetingTitle,
+                location: location ?? "外部导入",
+                audioPath: destURL.path,
+                duration: audioDuration,
+                status: .pendingDiarization,
+                summary: nil,
+                createdAt: formCreatedAt,
+                updatedAt: formCreatedAt
+            )
 
-        currentMeeting = meeting
-        audioPlayer.duration = 0
-        audioPlayer.currentTime = 0
-        transcriptSegments = []
+            do {
+                try databaseManager.createMeeting(meeting)
+            } catch {
+                errorAlert = "创建会议失败: \(error.localizedDescription)"
+                try? FileManager.default.removeItem(at: destURL)
+                return
+            }
+
+            currentMeeting = meeting
+            audioPlayer.duration = TimeInterval(audioDuration)
+            audioPlayer.currentTime = 0
+            transcriptSegments = []
+            segmentCount = 0
         meetingStatus = .reviewing
 
         runOfflineTranscription(for: meetingId, audioURL: destURL)
@@ -534,9 +620,26 @@ final class RecordingViewModel {
 
     /// 返回首页
     func finishReview() {
+        transcriptionTask?.cancel()
         if let meeting = currentMeeting {
-            // 在返回首页前，将用户的任何手工修改（文字、标签）覆盖保存到数据库
             saveSegmentsToDatabase(meetingId: meeting.id)
+            // 保存实际音频时长到数据库
+            let actualDuration = Int(audioPlayer.duration)
+            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
+            let line = "\(df.string(from: Date())) [Duration] finishReview: meetingId=\(meeting.id), DB旧时长=\(meeting.duration)s, audioPlayer时长=\(actualDuration)s\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            }
+            if actualDuration > 0 && actualDuration != meeting.duration {
+                try? databaseManager.updateMeetingInfo(
+                    id: meeting.id,
+                    title: meeting.title,
+                    location: meeting.location,
+                    createdAt: meeting.createdAt,
+                    attendees: meeting.attendees,
+                    duration: actualDuration
+                )
+            }
         }
         
         audioPlayer.stop() // 回收播放器资源
@@ -578,6 +681,17 @@ final class RecordingViewModel {
 
     /// 双模态对齐聚类算法：将声纹分离出的纯时间区间，匹配到带有文字的时间区间上
     private func alignSpeakerLabels(transcripts: [TranscriptSegment], diarization: [DiarizedSegment]) -> [TranscriptSegment] {
+        let wMin = transcripts.map(\.startTime).min() ?? 0
+        let wMax = transcripts.map(\.endTime).max() ?? 0
+        let dMin = diarization.map(\.startTime).min() ?? 0
+        let dMax = diarization.map(\.endTime).max() ?? 0
+        let dSpeakers = Set(diarization.map(\.speakerId)).sorted().joined(separator: ", ")
+        let logMsg = "对齐开始: Whisper时段[\(String(format:"%.0f",wMin))-\(String(format:"%.0f",wMax))s,\(transcripts.count)段] vs Diar时段[\(String(format:"%.0f",dMin))-\(String(format:"%.0f",dMax))s,\(diarization.count)段, speakers=\(dSpeakers)]"
+        let dfh = DateFormatter(); dfh.dateFormat = "HH:mm:ss.SSS"
+        let line = "\(dfh.string(from: Date())) [Align] \(logMsg)\n"
+        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            h.seekToEndOfFile(); h.write(d); h.closeFile()
+        }
         var results = transcripts
         
         for i in 0..<results.count {

@@ -8,43 +8,102 @@ actor WhisperService {
     private(set) var isReady = false
     private(set) var isLoading = false
     
-    /// 初始化并预加载模型（例如 openai_whisper-tiny 或 openai_whisper-base）
+    /// 初始化并预加载模型
     func initialize() async throws {
-        guard !isReady && !isLoading else { return }
+        if isReady && pipe != nil { return }
         isLoading = true
         defer { isLoading = false }
         
-        print("[WhisperService] 开始加载模型...")
-        // 这里默认加载轻量级的 base 模型，初次运行会自动从 HuggingFace 下载
-        self.pipe = try await WhisperKit(model: "openai_whisper-base")
+        let log = { (msg: String) in try? "[Whisper] \(msg)\n".data(using: .utf8).flatMap {
+            let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log"); h?.seekToEndOfFile(); h?.write($0); h?.closeFile()
+        } }
+        log("开始下载/加载 large-v3 模型 (~3GB)...")
+        self.pipe = try await WhisperKit(model: "openai_whisper-large-v3")
         self.isReady = true
-        print("[WhisperService] 模型加载完成！")
+        log("模型加载完成!")
     }
     
     /// 对保存的录音文件进行高精度离线转写
-    func transcribe(audioURL: URL, meetingId: String) async throws -> [TranscriptSegment] {
+    func transcribe(audioURL: URL, meetingId: String, onSegments: (([TranscriptSegment]) -> Void)? = nil) async throws -> [TranscriptSegment] {
+        // 强制确保模型已加载
+        try await initialize()
         guard let pipe = pipe else {
-            throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型尚未加载完成"])
+            throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型加载失败，请检查网络后重试"])
+        }
+
+        // 设置段发现回调：转写过程中持续输出中间结果
+        if let onSegments = onSegments {
+            pipe.segmentDiscoveryCallback = { whisperSegments in
+                let mapped = whisperSegments.map { seg in
+                    TranscriptSegment(
+                        id: "\(meetingId)_\(seg.id)",
+                        startTime: Double(seg.start),
+                        endTime: Double(seg.end),
+                        text: seg.text.toSimplifiedChinese(),
+                        speakerLabel: "Speaker_1",
+                        isFinal: true
+                    )
+                }
+                DispatchQueue.main.async { onSegments(mapped) }
+            }
         }
         
-        print("[WhisperService] 开始对 \(audioURL.path) 进行离线高精度转写...")
-        
-        // 配置解码选项：强制中文、去掉特殊 token、保留时间戳
+        let log = { (msg: String) in
+            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
+            let line = "\(df.string(from: Date())) [Whisper] \(msg)\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            } else { try? line.write(toFile: "/tmp/mttone_diag.log", atomically: true, encoding: .utf8) }
+        }
+        log("开始转写: \(audioURL.lastPathComponent), 模型=large-v3, lang=zh, temp=0.0")
+
+        // 设置段发现回调，并统计回调次数
+        var callbackCount = 0
+        if let onSegments = onSegments {
+            pipe.segmentDiscoveryCallback = { whisperSegments in
+                callbackCount += 1
+                let mapped = whisperSegments.map { seg in
+                    TranscriptSegment(
+                        id: "\(meetingId)_\(seg.id)",
+                        startTime: Double(seg.start),
+                        endTime: Double(seg.end),
+                        text: seg.text.toSimplifiedChinese(),
+                        speakerLabel: "Speaker_1",
+                        isFinal: true
+                    )
+                }
+                DispatchQueue.global().async {
+                    let sample = mapped.prefix(2).map { "[\(Int($0.startTime))s] \($0.text.prefix(30))" }.joined(separator: " | ")
+                    log("callback#\(callbackCount): \(mapped.count)段, 样例: \(sample)")
+                }
+                onSegments(mapped)
+            }
+        }
+
         let options = DecodingOptions(
             task: .transcribe,
             language: "zh",
+            temperature: 0.0,
+            temperatureFallbackCount: 0,
+            sampleLength: 224,
             skipSpecialTokens: true,
-            withoutTimestamps: false
+            withoutTimestamps: false,
+            compressionRatioThreshold: 2.4,
+            noSpeechThreshold: 0.6
         )
-        
-        // WhisperKit 直接支持输入本地音频文件路径
-        let results = try await pipe.transcribe(audioPath: audioURL.path, decodeOptions: options)
-        
+
         var parsedSegments: [TranscriptSegment] = []
-        
+
+        let results = try await pipe.transcribe(audioPath: audioURL.path, decodeOptions: options)
+
         if let result = results.first {
+            log("转写完成: \(result.segments.count) 段, callback共触发\(callbackCount)次")
+            // 打印转写文本样例
+            let samples = result.segments.prefix(5).map { "[\(Int($0.start))s] \($0.text.prefix(40))" }.joined(separator: " | ")
+            log("文本样例: \(samples)")
             for (index, segment) in result.segments.enumerated() {
-                let trimmedText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = segment.text
+                let trimmedText = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
                 guard !trimmedText.isEmpty else {
                     continue
                 }
@@ -60,7 +119,7 @@ actor WhisperService {
                     id: "\(meetingId)_whisper_\(index)",
                     startTime: Double(segment.start),
                     endTime: Double(segment.end),
-                    text: segment.text,
+                    text: segment.text.toSimplifiedChinese(),
                     speakerLabel: "Speaker_1", // Whisper 不支持声纹分离，默认统一标签
                     isFinal: true
                 )
@@ -79,12 +138,11 @@ actor WhisperService {
             throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型尚未加载完成"])
         }
         
-        // 极速模式：不带时间戳，关闭冗余输出
         let options = DecodingOptions(
             task: .transcribe,
             language: "zh",
             skipSpecialTokens: true,
-            withoutTimestamps: false // 保守起见，保持 false，某些模型在 true 下可能不吐字
+            withoutTimestamps: false
         )
         
         // 使用 WhisperKit 的纯数组转写接口
@@ -95,7 +153,7 @@ actor WhisperService {
         }
         
         // 直接使用 result.text，避免 segments 可能为空的情况
-        let fullText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullText = result.text.trimmingCharacters(in: .whitespacesAndNewlines).toSimplifiedChinese()
         
         // 过滤幻觉
         let lower = fullText.lowercased()
@@ -105,5 +163,13 @@ actor WhisperService {
         }
         
         return fullText
+    }
+}
+
+extension String {
+    func toSimplifiedChinese() -> String {
+        let mutable = NSMutableString(string: self)
+        CFStringTransform(mutable, nil, "Hant-Hans" as CFString, false)
+        return mutable as String
     }
 }

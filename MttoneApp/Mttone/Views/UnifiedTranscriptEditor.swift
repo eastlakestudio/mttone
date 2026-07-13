@@ -49,36 +49,44 @@ struct UnifiedTranscriptEditor: View {
                 .background(.purple.opacity(0.08))
             }
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 3) {
-                    ForEach(displayedSegments, id: \.1.id) { displayedIdx, seg in
-                        TranscriptRow(
-                            segment: seg,
-                            isFirst: displayedIdx == 0,
-                            isActive: seg.id == activeSegmentId,
-                            existingSpeakers: allSpeakers.filter { $0 != seg.speakerLabel },
-                            attendees: attendeeList,
-                            speakerColor: colorForSpeaker(seg.speakerLabel),
-                            onTextChange: { newText in
-                                if let si = segments.firstIndex(where: { $0.id == seg.id }) {
-                                    segments[si].text = newText
-                                }
-                            },
-                            onSpeakerChange: { newSpeaker in
-                                onSpeakerChanged?(seg.id, newSpeaker)
-                            },
-                            onMergeUp: {
-                                if let si = segments.firstIndex(where: { $0.id == seg.id }) {
-                                    mergeUp(si)
-                                }
-                            },
-                            onSplitAfter: { textAfter in
-                                if let si = segments.firstIndex(where: { $0.id == seg.id }) {
-                                    splitAfter(si, text: textAfter)
-                                }
-                            },
-                            onPlay: { onPlaySegment?(seg) }
-                        )
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 3) {
+                        ForEach(displayedSegments, id: \.1.id) { displayedIdx, seg in
+                            TranscriptRow(
+                                segment: seg,
+                                isFirst: displayedIdx == 0,
+                                isActive: seg.id == activeSegmentId,
+                                existingSpeakers: allSpeakers.filter { $0 != seg.speakerLabel },
+                                attendees: attendeeList,
+                                speakerColor: colorForSpeaker(seg.speakerLabel),
+                                onTextChange: { newText in
+                                    if let si = segments.firstIndex(where: { $0.id == seg.id }) {
+                                        segments[si].text = newText
+                                    }
+                                },
+                                onSpeakerChange: { newSpeaker in
+                                    onSpeakerChanged?(seg.id, newSpeaker)
+                                },
+                                onMergeUp: {
+                                    if let si = segments.firstIndex(where: { $0.id == seg.id }) {
+                                        mergeUp(si)
+                                    }
+                                },
+                                onSplitAfter: { textAfter in
+                                    if let si = segments.firstIndex(where: { $0.id == seg.id }) {
+                                        splitAfter(si, text: textAfter)
+                                    }
+                                },
+                                onPlay: { onPlaySegment?(seg) }
+                            )
+                            .id(seg.id)
+                        }
+                    }
+                }
+                .onChange(of: activeSegmentId) { _, newId in
+                    if let id = newId {
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
             }

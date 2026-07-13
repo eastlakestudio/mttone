@@ -11,6 +11,7 @@ struct ReviewingView: View {
     @State private var showInspector = true
     @State private var filterSpeaker: String? = nil
     @State private var attendeesString: String = ""
+    @State private var showDebugLog = false
 
     private var editedAttendeesList: [String] {
         let s = viewModel.currentMeeting?.attendees ?? ""
@@ -28,11 +29,25 @@ struct ReviewingView: View {
                     }
                     playbackControlPanel
 
-                    if viewModel.isTranscribingOffline {
+                    if viewModel.isTranscribingOffline && viewModel.transcriptSegments.isEmpty {
                         transcriptionLoadingView
-                    } else if viewModel.transcriptSegments.isEmpty, let meeting = viewModel.currentMeeting {
+                    } else if !viewModel.isTranscribingOffline && viewModel.transcriptSegments.isEmpty, let meeting = viewModel.currentMeeting {
                         emptyTranscriptView(meeting: meeting)
                     } else {
+                        if viewModel.isTranscribingOffline {
+                            HStack(spacing: 8) {
+                                ProgressView().scaleEffect(0.7)
+                                Text("正在转写... (\(viewModel.segmentCount) 段)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                if viewModel.segmentCount > 0, let meeting = viewModel.currentMeeting {
+                                    let pct = min(99, Int(Double(viewModel.segmentCount) / max(1, Double(meeting.duration) / 3.0) * 100))
+                                    Text("~\(pct)%")
+                                        .font(.caption).monospacedDigit().foregroundStyle(.purple)
+                                }
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 4)
+                        }
                         transcriptList
                     }
                 }
@@ -40,9 +55,56 @@ struct ReviewingView: View {
 
                 if showInspector {
                     Divider()
-                    MeetingInfoSidebar(viewModel: viewModel, filterSpeaker: $filterSpeaker, attendeesString: $attendeesString, showSpeakerSections: true)
-                        .frame(width: 260)
-                        .transition(.move(edge: .trailing))
+                    VStack(spacing: 0) {
+                        MeetingInfoSidebar(viewModel: viewModel, filterSpeaker: $filterSpeaker, attendeesString: $attendeesString, showSpeakerSections: true)
+                            .frame(maxHeight: .infinity)
+
+                        Divider()
+
+                        // 会议专用工具栏
+                        HStack(spacing: 12) {
+                            Button {
+                                showDebugLog = true
+                            } label: {
+                                Image(systemName: "ladybug")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("调试日志")
+
+                            Spacer()
+
+                            if let meeting = viewModel.currentMeeting, meeting.audioFileExists {
+                                Button {
+                                    let url = meeting.localAudioURL
+                                    viewModel.retryOfflineTranscription(for: meeting.id, audioURL: url)
+                                } label: {
+                                    Label(viewModel.isTranscribingOffline ? "分析中..." : (viewModel.transcriptSegments.isEmpty ? "重新分析" : "继续分析"),
+                                          systemImage: viewModel.isTranscribingOffline ? "hourglass" : "waveform.badge.magnifyingglass")
+                                        .font(.caption)
+                                }
+                                .disabled(viewModel.isTranscribingOffline)
+                                .buttonStyle(.bordered)
+                                .tint(.purple)
+                                .controlSize(.small)
+                            }
+
+                            Spacer()
+
+                            Button {
+                                exportMeetingRecord()
+                            } label: {
+                                Label("导出", systemImage: "square.and.arrow.up")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+                    .frame(width: 260)
+                    .transition(.move(edge: .trailing))
                 }
             }
             #if os(macOS)
@@ -69,17 +131,10 @@ struct ReviewingView: View {
                     .help("会议属性检查器")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    HStack(spacing: 8) {
-                        Button { exportMeetingRecord() } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        .help("导出会议记录")
-
-                        Button("完成") {
-                            viewModel.finishReview()
-                        }
-                        .fontWeight(.bold)
+                    Button("完成") {
+                        viewModel.finishReview()
                     }
+                    .fontWeight(.bold)
                 }
             }
             .onAppear {
@@ -89,6 +144,14 @@ struct ReviewingView: View {
                 for label in labels {
                     addAttendeeFromLabel(label)
                 }
+            }
+            .onChange(of: viewModel.audioPlayer.currentTime) { _, time in
+                if let seg = viewModel.transcriptSegments.first(where: { $0.startTime <= time && $0.endTime >= time }) {
+                    activeSegmentId = seg.id
+                }
+            }
+            .sheet(isPresented: $showDebugLog) {
+                DebugLogView()
             }
         }
     }
@@ -133,7 +196,7 @@ struct ReviewingView: View {
                 Image(systemName: "text.bubble")
                     .font(.largeTitle)
                     .foregroundStyle(.quaternary)
-                if meeting.status == .pendingDiarization || meeting.status == .completed {
+                if meeting.status == .pendingDiarization || meeting.status == .completed || meeting.status == .processingLlm {
                     Text("转写数据缺失")
                         .font(.headline)
                         .foregroundStyle(.secondary)
