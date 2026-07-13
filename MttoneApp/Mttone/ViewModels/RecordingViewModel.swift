@@ -209,13 +209,16 @@ final class RecordingViewModel {
         let segmentQueue = DispatchQueue(label: "segment.q")
         var pendingChunks: [[TranscriptSegment]] = []
 
-        // 共享变量：声纹分离结果（秒级完成）
+        // 共享变量：声纹分离结果 + 自动匹配映射
         let sharedDiar = UnsafeMutablePointer<[DiarizedSegment]?>.allocate(capacity: 1)
         sharedDiar.initialize(to: nil)
+        let sharedSpeakerMap = UnsafeMutablePointer<[String: String]?>.allocate(capacity: 1)
+        sharedSpeakerMap.initialize(to: nil)
 
         // 前台消费者：每 0.3s 批量读取，如有声纹分离结果则即时对齐
         let consumerTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
+            var saveCounter = 0
             while !Task.isCancelled {
                 var batch: [TranscriptSegment] = []
                 segmentQueue.sync { batch = pendingChunks.flatMap { $0 }; pendingChunks = [] }
@@ -224,12 +227,27 @@ final class RecordingViewModel {
                     for seg in batch where !seen.contains(seg.id) {
                         self.transcriptSegments.append(seg); seen.insert(seg.id)
                     }
-                    // 如果声纹分离已完成，立即对齐
                     if let diar = sharedDiar.pointee, !diar.isEmpty {
                         let aligned = self.alignSpeakerLabels(transcripts: self.transcriptSegments, diarization: diar)
-                        self.transcriptSegments = aligned.isEmpty ? self.transcriptSegments : aligned
+                        // 应用声纹自动匹配映射
+                        var finalAligned = aligned
+                        if let autoMap = sharedSpeakerMap.pointee, !autoMap.isEmpty {
+                            finalAligned = aligned.map { seg in
+                                var s = seg
+                                if let mappedName = autoMap[seg.speakerLabel] {
+                                    s.speakerLabel = mappedName
+                                }
+                                return s
+                            }
+                        }
+                        self.transcriptSegments = finalAligned.isEmpty ? self.transcriptSegments : finalAligned
                     }
                     self.segmentCount = self.transcriptSegments.count
+                }
+                // 每 10 次循环（~3秒）保存中间结果到数据库
+                saveCounter += 1
+                if saveCounter % 10 == 0 && !self.transcriptSegments.isEmpty {
+                    self.saveSegmentsToDatabase(meetingId: meetingId)
                 }
                 try? await Task.sleep(nanoseconds: 300_000_000)
                 if !self.isTranscribingOffline { break }
@@ -257,9 +275,29 @@ final class RecordingViewModel {
                 )
                 // 声纹分离先跑（秒级完成），结果共享给消费者即时对齐
                 _ = Task {
-                    if let diar = try? await DiarizationService.shared.diarize(audioURL: audioURL) {
-                        sharedDiar.pointee = diar
-                        log("声纹分离完毕: \(diar.count) 区间, 存储到共享变量")
+                    if let diarOutput = try? await DiarizationService.shared.diarizeWithEmbeddings(audioURL: audioURL) {
+                        sharedDiar.pointee = diarOutput.segments
+                        log("声纹分离完毕: \(diarOutput.segments.count) 区间, 向量: \(diarOutput.speakerEmbeddings.count)个")
+
+                        // 声纹匹配：与已知联系人比对
+                        let knownContacts = self.databaseManager.fetchContactsWithEmbeddings()
+                        if !knownContacts.isEmpty {
+                            let matches = DiarizationService.matchSpeakers(
+                                newEmbeddings: diarOutput.speakerEmbeddings,
+                                knownContacts: knownContacts
+                            )
+                            var autoMap: [String: String] = [:]
+                            for (speakerId, match) in matches where match.score > 0.7 {
+                                autoMap[speakerId] = match.contactName
+                                log("声纹匹配: \(speakerId)→\(match.contactName) (置信度: \(String(format:"%.2f",match.score)))")
+                                // 保存/更新声纹向量到联系人
+                                try? self.databaseManager.saveContactEmbedding(contactId: match.contactId, embedding: diarOutput.speakerEmbeddings[speakerId] ?? [])
+                            }
+                            if !autoMap.isEmpty { sharedSpeakerMap.pointee = autoMap }
+                            else { log("声纹匹配: 无高置信度匹配") }
+                        } else {
+                            log("声纹匹配跳过: 无已知联系人向量")
+                        }
                     }
                 }
 

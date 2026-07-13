@@ -17,6 +17,8 @@ struct PersonnelManagementView: View {
     @State private var editingAttrRole = ""
     @State private var editingAttrCompany = ""
     @State private var isDirty = false
+    @State private var lastLoadedContactId: String?
+    @State private var clipPlayer = AudioPlayer()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -116,28 +118,32 @@ struct PersonnelManagementView: View {
             HStack {
                 Text("人员属性").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                if isDirty {
-                    Button("保存") {
-                        let updated = Contact(
-                            id: contact.id,
-                            name: editingAttrName.trimmingCharacters(in: .whitespaces),
-                            role: editingAttrRole.trimmingCharacters(in: .whitespaces).isEmpty ? nil : editingAttrRole.trimmingCharacters(in: .whitespaces),
-                            company: editingAttrCompany.trimmingCharacters(in: .whitespaces).isEmpty ? nil : editingAttrCompany.trimmingCharacters(in: .whitespaces),
-                            avatarUrl: contact.avatarUrl,
-                            createdAt: contact.createdAt,
-                            updatedAt: Date()
-                        )
-                        try? db.saveContact(updated)
-                        selectedContact = updated
-                        contacts = db.fetchAllContacts()
-                        isDirty = false
+                // 预留固定高度按钮区域，避免面板抖动
+                ZStack {
+                    if isDirty {
+                        Button("保存") {
+                            let updated = Contact(
+                                id: contact.id,
+                                name: editingAttrName.trimmingCharacters(in: .whitespaces),
+                                role: editingAttrRole.trimmingCharacters(in: .whitespaces).isEmpty ? nil : editingAttrRole.trimmingCharacters(in: .whitespaces),
+                                company: editingAttrCompany.trimmingCharacters(in: .whitespaces).isEmpty ? nil : editingAttrCompany.trimmingCharacters(in: .whitespaces),
+                                avatarUrl: contact.avatarUrl,
+                                createdAt: contact.createdAt,
+                                updatedAt: Date()
+                            )
+                            try? db.saveContact(updated)
+                            selectedContact = updated
+                            contacts = db.fetchAllContacts()
+                            isDirty = false
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.purple)
+                        .controlSize(.small)
+                        .disabled(editingAttrName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
-                    .font(.caption)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.purple)
-                    .controlSize(.small)
-                    .disabled(editingAttrName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
+                .frame(height: 22)
             }
             VStack(spacing: 6) {
                 HStack {
@@ -145,21 +151,21 @@ struct PersonnelManagementView: View {
                     TextField("", text: $editingAttrName)
                         .textFieldStyle(.roundedBorder)
                         .font(.subheadline)
-                        .onChange(of: editingAttrName) { _, _ in isDirty = true }
-                }
-                HStack {
-                    Text("角色").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
-                    TextField("", text: $editingAttrRole)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.subheadline)
-                        .onChange(of: editingAttrRole) { _, _ in isDirty = true }
-                }
-                HStack {
-                    Text("组织").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
-                    TextField("", text: $editingAttrCompany)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.subheadline)
-                        .onChange(of: editingAttrCompany) { _, _ in isDirty = true }
+                        .onChange(of: editingAttrName) { _, _ in setDirtyIfChanged(contact) }
+                    }
+                    HStack {
+                        Text("角色").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                        TextField("", text: $editingAttrRole)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.subheadline)
+                            .onChange(of: editingAttrRole) { _, _ in setDirtyIfChanged(contact) }
+                    }
+                    HStack {
+                        Text("组织").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                        TextField("", text: $editingAttrCompany)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.subheadline)
+                            .onChange(of: editingAttrCompany) { _, _ in setDirtyIfChanged(contact) }
                 }
             }
         }
@@ -222,10 +228,17 @@ struct PersonnelManagementView: View {
                                         Text(clip.cleanedText ?? clip.originalText)
                                             .font(.body)
                                         HStack {
+                                            Button {
+                                                playClip(clip, meeting: group.meeting)
+                                            } label: {
+                                                Image(systemName: clipPlayer.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                                                    .font(.caption).foregroundStyle(.blue)
+                                            }
+                                            .buttonStyle(.plain)
                                             Text(formatTime(clip.startTime))
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                    Text("· \(String(format: "%.1f", clip.endTime - clip.startTime))s")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                            Text("· \(String(format: "%.1f", clip.endTime - clip.startTime))s")
+                                                .font(.caption2).foregroundStyle(.secondary)
                                             Spacer()
                                         }
                                     }
@@ -246,6 +259,31 @@ struct PersonnelManagementView: View {
     private func personColor(_ name: String) -> Color {
         let c: [Color] = [.purple, .blue, .orange, .green, .pink, .teal, .indigo, .mint]
         return c[abs(name.hashValue) % c.count]
+    }
+
+    private func setDirtyIfChanged(_ contact: Contact) {
+        guard selectedContact?.id == contact.id else { return }
+        let nameChanged = editingAttrName.trimmingCharacters(in: .whitespaces) != contact.name
+        let roleChanged = editingAttrRole.trimmingCharacters(in: .whitespaces) != (contact.role ?? "")
+        let companyChanged = editingAttrCompany.trimmingCharacters(in: .whitespaces) != (contact.company ?? "")
+        isDirty = nameChanged || roleChanged || companyChanged
+    }
+
+    private func playClip(_ clip: SpeechClip, meeting: Meeting) {
+        let url = meeting.localAudioURL
+        clipPlayer.playbackEndTime = clip.endTime
+        clipPlayer.seek(to: clip.startTime)
+        if !clipPlayer.hasPlayer {
+            clipPlayer.startPlaying(url: url)
+            // 等播放器初始化后再 seek 一次
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                clipPlayer.playbackEndTime = clip.endTime
+                clipPlayer.seek(to: clip.startTime)
+                if !clipPlayer.isPlaying { clipPlayer.resume() }
+            }
+        } else if !clipPlayer.isPlaying {
+            clipPlayer.resume()
+        }
     }
 
     private func formatTime(_ t: Double) -> String {

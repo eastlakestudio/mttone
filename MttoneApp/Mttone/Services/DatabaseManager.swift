@@ -144,6 +144,19 @@ final class DatabaseManager {
                 sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN company TEXT;", nil, nil, nil)
                 print("[DB] Added company column to contacts table.")
             }
+
+            // 增量检查 contacts 表的 voice_embedding 字段（BLOB）
+            var hasEmbed = false
+            if sqlite3_prepare_v2(db, checkContactSql, -1, &contactStmt, nil) == SQLITE_OK {
+                while sqlite3_step(contactStmt) == SQLITE_ROW {
+                    if let n = columnOptionalText(contactStmt, index: 1), n == "voice_embedding" { hasEmbed = true }
+                }
+                sqlite3_finalize(contactStmt)
+            }
+            if !hasEmbed {
+                sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN voice_embedding BLOB;", nil, nil, nil)
+                print("[DB] Added voice_embedding column to contacts table.")
+            }
         }
     }
 
@@ -677,6 +690,44 @@ final class DatabaseManager {
     
     // MARK: - Contacts CRUD
     
+    func saveContactEmbedding(contactId: String, embedding: [Float]) throws {
+        let data = embedding.withUnsafeBytes { Data($0) }
+        let sql = "UPDATE contacts SET voice_embedding = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        data.withUnsafeBytes { ptr in
+            sqlite3_bind_blob(stmt, 1, ptr.baseAddress, Int32(data.count), SQLITE_TRANSIENT)
+        }
+        sqlite3_bind_text(stmt, 2, contactId.cString, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+    }
+
+    func fetchContactsWithEmbeddings() -> [(id: String, name: String, embedding: [Float])] {
+        let sql = "SELECT id, name, voice_embedding FROM contacts WHERE voice_embedding IS NOT NULL"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var results: [(id: String, name: String, embedding: [Float])] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = columnText(stmt, index: 0)
+            let name = columnText(stmt, index: 1)
+            if let blob = sqlite3_column_blob(stmt, 2) {
+                let count = Int(sqlite3_column_bytes(stmt, 2))
+                let data = Data(bytes: blob, count: count)
+                let embedding = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                if !embedding.isEmpty {
+                    results.append((id: id, name: name, embedding: embedding))
+                }
+            }
+        }
+        return results
+    }
+
     func fetchAllContacts() -> [Contact] {
         let sql = "SELECT id, name, role, company, avatar_url, created_at, updated_at FROM contacts ORDER BY name ASC"
         var stmt: OpaquePointer?

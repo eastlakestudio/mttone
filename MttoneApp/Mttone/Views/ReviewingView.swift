@@ -37,16 +37,19 @@ struct ReviewingView: View {
                         if viewModel.isTranscribingOffline {
                             HStack(spacing: 8) {
                                 ProgressView().scaleEffect(0.7)
-                                Text("正在转写... (\(viewModel.segmentCount) 段)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
                                 if viewModel.segmentCount > 0, let meeting = viewModel.currentMeeting {
-                                    let pct = min(99, Int(Double(viewModel.segmentCount) / max(1, Double(meeting.duration) / 3.0) * 100))
-                                    Text("~\(pct)%")
-                                        .font(.caption).monospacedDigit().foregroundStyle(.purple)
+                                    let total = max(1, Double(meeting.duration) / 3.0)
+                                    let pct = min(99, Int(Double(viewModel.segmentCount) / total * 100))
+                                    Text("转写中 \(viewModel.segmentCount)段 (~\(pct)%)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Text("转写中...")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
+                                Spacer()
                             }
                             .padding(.horizontal, 12).padding(.vertical, 4)
+                            .background(.blue.opacity(0.06))
                         }
                         transcriptList
                     }
@@ -243,9 +246,15 @@ struct ReviewingView: View {
             contacts: databaseManager.fetchAllContacts().map { $0.name },
             onPlaySegment: { seg in playSegment(seg) },
             onSpeakerChanged: { segId, newSpeaker in
-                try? "[Mttone] onSpeakerChanged: \(segId) → \(newSpeaker)".write(toFile: "/tmp/mttone_debug.log", atomically: true, encoding: .utf8)
                 if let idx = viewModel.transcriptSegments.firstIndex(where: { $0.id == segId }) {
                     viewModel.transcriptSegments[idx].speakerLabel = newSpeaker
+                    // 挂载联系人 ID：声纹匹配和全局人员视图依赖 contactId
+                    var contact = databaseManager.fetchContact(byName: newSpeaker)
+                    if contact == nil {
+                        contact = Contact.create(name: newSpeaker)
+                        try? databaseManager.saveContact(contact!)
+                    }
+                    viewModel.transcriptSegments[idx].contactId = contact?.id
                 }
                 addAttendeeFromLabel(newSpeaker)
             }
