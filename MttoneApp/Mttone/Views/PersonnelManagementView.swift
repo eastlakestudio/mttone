@@ -13,6 +13,10 @@ struct PersonnelManagementView: View {
     @State private var editContact: Contact?
     @State private var selectedContact: Contact?
     @State private var groupedClips: [PersonGroupedClips] = []
+    @State private var editingAttrName = ""
+    @State private var editingAttrRole = ""
+    @State private var editingAttrCompany = ""
+    @State private var isDirty = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -66,6 +70,10 @@ struct PersonnelManagementView: View {
                 List(contacts, id: \.id) { contact in
                     Button {
                         selectedContact = contact
+                        editingAttrName = contact.name
+                        editingAttrRole = contact.role ?? ""
+                        editingAttrCompany = contact.company ?? ""
+                        isDirty = false
                         let items = db.fetchSpeechClipsGroupedByMeeting(forContact: contact.id)
                         groupedClips = items.map { PersonGroupedClips(meeting: $0.meeting, clips: $0.clips) }
                     } label: {
@@ -105,24 +113,53 @@ struct PersonnelManagementView: View {
 
     private func attributePanel(_ contact: Contact) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("人员属性").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("人员属性").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if isDirty {
+                    Button("保存") {
+                        let updated = Contact(
+                            id: contact.id,
+                            name: editingAttrName.trimmingCharacters(in: .whitespaces),
+                            role: editingAttrRole.trimmingCharacters(in: .whitespaces).isEmpty ? nil : editingAttrRole.trimmingCharacters(in: .whitespaces),
+                            company: editingAttrCompany.trimmingCharacters(in: .whitespaces).isEmpty ? nil : editingAttrCompany.trimmingCharacters(in: .whitespaces),
+                            avatarUrl: contact.avatarUrl,
+                            createdAt: contact.createdAt,
+                            updatedAt: Date()
+                        )
+                        try? db.saveContact(updated)
+                        selectedContact = updated
+                        contacts = db.fetchAllContacts()
+                        isDirty = false
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .controlSize(.small)
+                    .disabled(editingAttrName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
             VStack(spacing: 6) {
                 HStack {
                     Text("姓名").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
-                    Text(contact.name).font(.subheadline)
-                    Spacer()
+                    TextField("", text: $editingAttrName)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.subheadline)
+                        .onChange(of: editingAttrName) { _, _ in isDirty = true }
                 }
                 HStack {
                     Text("角色").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
-                    Text(contact.role ?? "—").font(.subheadline)
-                        .foregroundStyle(contact.role != nil ? .purple : .secondary)
-                    Spacer()
+                    TextField("", text: $editingAttrRole)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.subheadline)
+                        .onChange(of: editingAttrRole) { _, _ in isDirty = true }
                 }
                 HStack {
                     Text("组织").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
-                    Text(contact.company ?? "—").font(.subheadline)
-                        .foregroundStyle(contact.company != nil ? .primary : .secondary)
-                    Spacer()
+                    TextField("", text: $editingAttrCompany)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.subheadline)
+                        .onChange(of: editingAttrCompany) { _, _ in isDirty = true }
                 }
             }
         }

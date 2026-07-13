@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// 录音结束后的回顾页面
 struct ReviewingView: View {
@@ -66,10 +69,17 @@ struct ReviewingView: View {
                     .help("会议属性检查器")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        viewModel.finishReview()
+                    HStack(spacing: 8) {
+                        Button { exportMeetingRecord() } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .help("导出会议记录")
+
+                        Button("完成") {
+                            viewModel.finishReview()
+                        }
+                        .fontWeight(.bold)
                     }
-                    .fontWeight(.bold)
                 }
             }
             .onAppear {
@@ -289,6 +299,47 @@ struct ReviewingView: View {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: date)
+    }
+
+    private func exportMeetingRecord() {
+        guard let meeting = viewModel.currentMeeting else { return }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        var text = """
+        会议主题: \(meeting.title)
+        会议地点: \(meeting.location ?? "未指定")
+        开始时间: \(formatter.string(from: meeting.createdAt))
+        录音时长: \(formatDuration(TimeInterval(meeting.duration)))
+        参会人员: \(meeting.attendees ?? "未指定")
+        
+        ========================================
+        会议记录
+        ========================================
+        
+        """
+
+        let segments = viewModel.transcriptSegments.filter { $0.isFinal }
+        for seg in segments {
+            let time = formatTime(seg.startTime)
+            text += "[\(time)] \(seg.speakerLabel): \(seg.text)\n\n"
+        }
+
+        #if os(macOS)
+        let savePanel = NSSavePanel()
+        savePanel.title = "导出会议记录"
+        savePanel.nameFieldStringValue = "\(meeting.title).txt"
+        savePanel.allowedContentTypes = [.plainText]
+        savePanel.canCreateDirectories = true
+        if savePanel.runModal() == .OK, let url = savePanel.url {
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        #endif
+    }
+
+    private func formatDuration(_ t: TimeInterval) -> String {
+        let mins = Int(t)/60, secs = Int(t)%60
+        return "\(mins)分\(secs)秒"
     }
 
     private func playSegment(_ segment: TranscriptSegment) {

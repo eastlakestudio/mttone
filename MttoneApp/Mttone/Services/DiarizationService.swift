@@ -19,9 +19,10 @@ actor DiarizationService {
         }
         print("[DiarizationService] 初始化 FluidAudio 离线分离器并检查模型...")
         
-        // 默认 clusteringThreshold 是 0.6。
-        // 如果把两个人的声音合并了，说明阈值太宽松了。降低阈值（如 0.45）可以更严格地把不同特征判定为不同的人。
-        let config = OfflineDiarizerConfig(clusteringThreshold: 0.45)
+        // clusteringThreshold 是一个相似度阈值（不是距离）。
+        // 数值越高越宽松合并，数值越低越严格分离。0.7 ~ 0.8 是比较好的平衡点。
+        // 之前 0.45 过于宽松导致多人声音被合并成一个。
+        let config = OfflineDiarizerConfig(clusteringThreshold: 0.75)
         let newManager = OfflineDiarizerManager(config: config)
         try await newManager.prepareModels()
         self.manager = newManager
@@ -49,7 +50,8 @@ actor DiarizationService {
             )
         }
         
-        print("[DiarizationService] 声纹聚类推理完毕，共分离出 \(segments.count) 个发音区间")
+        let uniqueSpeakers = Set(segments.map(\.speakerId)).sorted()
+        print("[DiarizationService] 声纹聚类完毕: \(segments.count) 区间 / \(uniqueSpeakers.count) 个不同说话人 (\(uniqueSpeakers.joined(separator: ", ")))")
         return segments
     }
 }

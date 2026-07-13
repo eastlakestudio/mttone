@@ -311,6 +311,15 @@ struct MeetingInfoSidebar: View {
                         }.buttonStyle(.plain)
 
                         Menu {
+                            if !editedAttendeesList.isEmpty {
+                                Section("分配到参会人") {
+                                    ForEach(editedAttendeesList.filter { $0 != item.speaker }, id: \.self) { person in
+                                        Button(person) {
+                                            viewModel.globalRenameSpeaker(oldName: item.speaker, newName: person)
+                                        }
+                                    }
+                                }
+                            }
                             Button("重命名") {
                                 renameTarget = item.speaker; renamePerson = item.speaker
                                 showRenameAttendeePopover = true
