@@ -1,81 +1,106 @@
-# Privacy Policy / 隐私政策
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy / 隐私政策 — AuraNote 听纪</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+            max-width: 720px;
+            margin: 40px auto;
+            padding: 0 24px;
+            color: #1d1d1f;
+            line-height: 1.7;
+        }
+        h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+        h2 { font-size: 20px; font-weight: 600; margin-top: 32px; color: #333; }
+        h3 { font-size: 16px; font-weight: 600; margin-top: 24px; }
+        p, li { font-size: 15px; color: #444; }
+        table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+        th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #e5e5e5; font-size: 14px; }
+        th { font-weight: 600; color: #555; }
+        .date { color: #888; font-size: 14px; margin-bottom: 24px; }
+        .lang-label { color: #888; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 32px; border-top: 1px solid #e5e5e5; padding-top: 16px; }
+        a { color: #0071e3; text-decoration: none; }
+        hr { border: none; border-top: 1px solid #e5e5e5; margin: 32px 0; }
+    </style>
+</head>
+<body>
 
-**Last updated / 最后更新: 2026-07-14**
+<h1>AuraNote 听纪 — 隐私政策</h1>
+<p class="date">最后更新: 2026-07-14</p>
 
-## English
+<p>AuraNote（"听纪"）是一款本地离线会议纪要应用。我们郑重承诺保护您的隐私。本隐私政策同时提供<a href="#english">英文版本</a>。</p>
 
-AuraNote ("听纪") is a local offline meeting minutes application. We take your privacy seriously.
+<h2>1. 数据收集</h2>
+<p><strong>听纪不会收集、存储或向外部服务器传输任何个人数据。</strong> 所有处理完全在您的设备上完成：</p>
+<ul>
+    <li><strong>录音文件</strong> — 仅存储于应用的沙盒 Documents 目录，绝不上传</li>
+    <li><strong>转写文本</strong> — 通过 WhisperKit 在设备端生成，音频和文本均不离开您的 Mac</li>
+    <li><strong>声纹特征</strong> — 通过 FluidAudio 提取的 256 维向量仅存储于本地，仅用于应用内发言人识别</li>
+    <li><strong>会议数据</strong> — 存储于本地 SQLite 数据库（auranote.db），不与任何云服务同步</li>
+    <li><strong>联系人信息</strong> — 您输入的姓名、角色、组织信息仅存储在本地</li>
+</ul>
 
-### Data Collection
+<h2>2. 权限说明</h2>
+<p>听纪请求以下权限：</p>
+<table>
+    <tr><th>权限</th><th>用途</th></tr>
+    <tr><td>麦克风</td><td>录制会议音频</td></tr>
+    <tr><td>语音识别</td><td>实时语音转文字</td></tr>
+    <tr><td>文件访问</td><td>导入/导出音频文件及会议纪要</td></tr>
+    <tr><td>网络</td><td>下载语音识别模型（从 HuggingFace 获取 WhisperKit）</td></tr>
+</table>
 
-**AuraNote does NOT collect, store, or transmit any personal data to external servers.** All processing happens entirely on your device:
+<h2>3. 第三方服务</h2>
+<ul>
+    <li><strong>WhisperKit</strong>（OpenAI）— 从 HuggingFace 下载语音转文字模型。不向 OpenAI 发送任何数据。</li>
+    <li><strong>FluidAudio</strong> — 声纹分离模型。完全离线运行。</li>
+</ul>
 
-- **Audio recordings** — Stored locally in the app's sandboxed Documents directory. Never uploaded.
-- **Transcriptions** — Generated on-device using WhisperKit. No audio or text leaves your Mac.
-- **Speaker voiceprints** — 256-dimension embeddings extracted and stored locally using FluidAudio. Used solely for within-app speaker identification.
-- **Meeting data** — Stored in a local SQLite database (`auranote.db`). Never synced to any cloud service.
-- **Contact information** — Names, roles, and organizations you enter are stored locally only.
+<h2>4. 儿童隐私</h2>
+<p>听纪不面向 13 岁以下儿童。</p>
 
-### Permissions
+<h2>5. 联系方式</h2>
+<p>隐私问题请联系：<a href="mailto:mingh.liu@gmail.com">mingh.liu@gmail.com</a></p>
 
-AuraNote requests the following permissions:
+<hr id="english">
 
-| Permission | Purpose |
-|------------|---------|
-| Microphone | To record meeting audio |
-| Speech Recognition | For real-time transcription |
-| File Access | To import/export audio files and meeting notes |
-| Network | To download speech recognition models (WhisperKit from HuggingFace) |
+<h2>Privacy Policy (English)</h2>
 
-### Third-Party Services
+<p>AuraNote takes your privacy seriously.</p>
 
-- **WhisperKit** (OpenAI) — Speech-to-text model downloaded from HuggingFace. No data sent to OpenAI.
-- **FluidAudio** — Speaker diarization models. Fully offline.
+<h3>Data Collection</h3>
+<p><strong>AuraNote does NOT collect, store, or transmit any personal data to external servers.</strong> All processing happens entirely on your device:</p>
+<ul>
+    <li><strong>Audio recordings</strong> — Stored locally in the app's sandboxed Documents directory. Never uploaded.</li>
+    <li><strong>Transcriptions</strong> — Generated on-device using WhisperKit. No audio or text leaves your Mac.</li>
+    <li><strong>Speaker voiceprints</strong> — 256-dimension embeddings extracted and stored locally using FluidAudio. Used solely for within-app speaker identification.</li>
+    <li><strong>Meeting data</strong> — Stored in a local SQLite database (auranote.db). Never synced to any cloud service.</li>
+    <li><strong>Contact information</strong> — Names, roles, and organizations you enter are stored locally only.</li>
+</ul>
 
-### Children's Privacy
+<h3>Permissions</h3>
+<table>
+    <tr><th>Permission</th><th>Purpose</th></tr>
+    <tr><td>Microphone</td><td>To record meeting audio</td></tr>
+    <tr><td>Speech Recognition</td><td>For real-time transcription</td></tr>
+    <tr><td>File Access</td><td>To import/export audio files and meeting notes</td></tr>
+    <tr><td>Network</td><td>To download speech recognition models (WhisperKit from HuggingFace)</td></tr>
+</table>
 
-AuraNote is not intended for use by children under 13.
+<h3>Third-Party Services</h3>
+<ul>
+    <li><strong>WhisperKit</strong> (OpenAI) — Speech-to-text model downloaded from HuggingFace. No data sent to OpenAI.</li>
+    <li><strong>FluidAudio</strong> — Speaker diarization models. Fully offline.</li>
+</ul>
 
-### Contact
+<h3>Children's Privacy</h3>
+<p>AuraNote is not intended for use by children under 13.</p>
 
-For privacy concerns, contact us at: mingh.liu@gmail.com
+<h3>Contact</h3>
+<p>For privacy concerns, contact: <a href="mailto:mingh.liu@gmail.com">mingh.liu@gmail.com</a></p>
 
----
-
-## 简体中文
-
-听纪（AuraNote）是一款本地离线会议纪要应用。我们郑重承诺保护您的隐私。
-
-### 数据收集
-
-**听纪不会收集、存储或向外部服务器传输任何个人数据。** 所有处理完全在您的设备上完成：
-
-- **录音文件** — 仅存储于应用的沙盒 Documents 目录，绝不上传
-- **转写文本** — 通过 WhisperKit 在设备端生成，音频和文本均不离开您的 Mac
-- **声纹特征** — 通过 FluidAudio 提取的 256 维向量仅存储于本地，仅用于应用内发言人识别
-- **会议数据** — 存储于本地 SQLite 数据库（`auranote.db`），不与任何云服务同步
-- **联系人信息** — 您输入的姓名、角色、组织信息仅存储在本地
-
-### 权限说明
-
-听纪请求以下权限：
-
-| 权限 | 用途 |
-|------|------|
-| 麦克风 | 录制会议音频 |
-| 语音识别 | 实时语音转文字 |
-| 文件访问 | 导入/导出音频文件及会议纪要 |
-| 网络 | 下载语音识别模型（从 HuggingFace 获取 WhisperKit） |
-
-### 第三方服务
-
-- **WhisperKit**（OpenAI）— 从 HuggingFace 下载语音转文字模型。不向 OpenAI 发送任何数据。
-- **FluidAudio** — 声纹分离模型。完全离线运行。
-
-### 儿童隐私
-
-听纪不面向 13 岁以下儿童。
-
-### 联系方式
-
-隐私问题请联系：mingh.liu@gmail.com
+</body>
+</html>
