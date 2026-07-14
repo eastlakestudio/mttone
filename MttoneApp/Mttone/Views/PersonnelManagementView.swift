@@ -10,6 +10,8 @@ struct PersonnelManagementView: View {
     @Environment(DatabaseManager.self) private var db
     @State private var contacts: [Contact] = []
     @State private var showAddSheet = false
+    @State private var showDeleteConfirm = false
+    @State private var deleteTarget: Contact?
     @State private var editContact: Contact?
     @State private var selectedContact: Contact?
     @State private var groupedClips: [PersonGroupedClips] = []
@@ -47,6 +49,21 @@ struct PersonnelManagementView: View {
                 contacts = db.fetchAllContacts()
                 editContact = nil
             }, onCancel: { editContact = nil })
+        }
+        .alert("确认删除", isPresented: $showDeleteConfirm) {
+            Button("取消", role: .cancel) { deleteTarget = nil }
+            Button("删除", role: .destructive) {
+                if let contact = deleteTarget {
+                    try? db.deleteContact(id: contact.id)
+                    contacts = db.fetchAllContacts()
+                    if selectedContact?.id == contact.id { selectedContact = nil }
+                    deleteTarget = nil
+                }
+            }
+        } message: {
+            if let contact = deleteTarget {
+                Text("确定删除「\(contact.name)」吗？此操作不可撤销。\n该人员的声纹向量和发言记录关联将被清除。")
+            }
         }
     }
 
@@ -98,6 +115,13 @@ struct PersonnelManagementView: View {
                     .contextMenu {
                         Button { editContact = contact } label: {
                             Label("编辑", systemImage: "pencil")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            deleteTarget = contact
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("删除", systemImage: "trash")
                         }
                     }
                 }

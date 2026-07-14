@@ -157,6 +157,21 @@ final class DatabaseManager {
                 sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN voice_embedding BLOB;", nil, nil, nil)
                 print("[DB] Added voice_embedding column to contacts table.")
             }
+
+            // 增量检查 meetings 表的 embedding_blob 字段
+            var hasMeetingEmbed = false
+            let checkMeetingSql = "PRAGMA table_info(meetings);"
+            var meetingStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, checkMeetingSql, -1, &meetingStmt, nil) == SQLITE_OK {
+                while sqlite3_step(meetingStmt) == SQLITE_ROW {
+                    if let n = columnOptionalText(meetingStmt, index: 1), n == "embedding_blob" { hasMeetingEmbed = true }
+                }
+                sqlite3_finalize(meetingStmt)
+            }
+            if !hasMeetingEmbed {
+                sqlite3_exec(db, "ALTER TABLE meetings ADD COLUMN embedding_blob BLOB;", nil, nil, nil)
+                print("[DB] Added embedding_blob column to meetings table.")
+            }
         }
     }
 
@@ -444,6 +459,26 @@ final class DatabaseManager {
         return 0
     }
 
+    func deleteContact(id: String) throws {
+        // 清空关联的 speech_clips 的 contact_id
+        let updateSQL = "UPDATE speech_clips SET contact_id = NULL WHERE contact_id = ?"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, updateSQL, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(stmt, 1, id.cString, -1, SQLITE_TRANSIENT)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+        let deleteSQL = "DELETE FROM contacts WHERE id = ?"
+        guard sqlite3_prepare_v2(db, deleteSQL, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, id.cString, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+    }
+
     func deleteMeeting(id: String) throws {
         let sql = "SELECT audio_path FROM meetings WHERE id = ?"
         var stmt: OpaquePointer?
@@ -725,7 +760,46 @@ final class DatabaseManager {
                 }
             }
         }
+        let names = results.map { $0.name }.joined(separator: ", ")
+        let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
+        let line = "\(df.string(from: Date())) [DB] fetchContactsWithEmbeddings: \(results.count)人 (\(names.isEmpty ? "无" : names))\n"
+        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            h.seekToEndOfFile(); h.write(d); h.closeFile()
+        }
         return results
+    }
+
+    func saveMeetingEmbeddings(meetingId: String, embeddings: [String: [Float]]) throws {
+        let data = try JSONEncoder().encode(embeddings)
+        let sql = "UPDATE meetings SET embedding_blob = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        data.withUnsafeBytes { ptr in
+            sqlite3_bind_blob(stmt, 1, ptr.baseAddress, Int32(data.count), SQLITE_TRANSIENT)
+        }
+        sqlite3_bind_text(stmt, 2, meetingId.cString, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+    }
+
+    func fetchMeetingEmbeddings(meetingId: String) -> [String: [Float]] {
+        let sql = "SELECT embedding_blob FROM meetings WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, meetingId.cString, -1, SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) == SQLITE_ROW {
+            if let blob = sqlite3_column_blob(stmt, 0) {
+                let count = Int(sqlite3_column_bytes(stmt, 0))
+                let data = Data(bytes: blob, count: count)
+                return (try? JSONDecoder().decode([String: [Float]].self, from: data)) ?? [:]
+            }
+        }
+        return [:]
     }
 
     func fetchAllContacts() -> [Contact] {

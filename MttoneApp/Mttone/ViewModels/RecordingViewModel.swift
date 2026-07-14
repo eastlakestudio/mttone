@@ -48,7 +48,8 @@ final class RecordingViewModel {
     var isTranscribingOffline: Bool = false
     var segmentCount: Int = 0
     private var transcriptionTask: Task<Void, Never>?
-    
+    nonisolated(unsafe) var lastDiarEmbeddings: [String: [Float]]?
+
     // 定时器
     private var durationTimer: Timer?
 
@@ -212,8 +213,10 @@ final class RecordingViewModel {
         // 共享变量：声纹分离结果 + 自动匹配映射
         let sharedDiar = UnsafeMutablePointer<[DiarizedSegment]?>.allocate(capacity: 1)
         sharedDiar.initialize(to: nil)
-        let sharedSpeakerMap = UnsafeMutablePointer<[String: String]?>.allocate(capacity: 1)
+        let sharedSpeakerMap = UnsafeMutablePointer<[String: (name: String, contactId: String)]?>.allocate(capacity: 1)
         sharedSpeakerMap.initialize(to: nil)
+        let sharedEmbeddings = UnsafeMutablePointer<[String: [Float]]?>.allocate(capacity: 1)
+        sharedEmbeddings.initialize(to: nil)
 
         // 前台消费者：每 0.3s 批量读取，如有声纹分离结果则即时对齐
         let consumerTask = Task { @MainActor [weak self] in
@@ -228,16 +231,44 @@ final class RecordingViewModel {
                         self.transcriptSegments.append(seg); seen.insert(seg.id)
                     }
                     if let diar = sharedDiar.pointee, !diar.isEmpty {
+                        // 保存用户手动分配的标签（非 Speaker_ 开头的视为手动分配）
+                        var customLabels: [String: (label: String, contactId: String?)] = [:]
+                        for seg in self.transcriptSegments {
+                            if !seg.speakerLabel.hasPrefix("Speaker_") {
+                                customLabels[seg.id] = (seg.speakerLabel, seg.contactId)
+                            }
+                        }
+
                         let aligned = self.alignSpeakerLabels(transcripts: self.transcriptSegments, diarization: diar)
-                        // 应用声纹自动匹配映射
+                        // 恢复手动分配的标签
                         var finalAligned = aligned
+                        if !customLabels.isEmpty {
+                            finalAligned = aligned.map { seg in
+                                var s = seg
+                                if let saved = customLabels[seg.id] {
+                                    s.speakerLabel = saved.label
+                                    s.contactId = saved.contactId
+                                }
+                                return s
+                            }
+                        }
                         if let autoMap = sharedSpeakerMap.pointee, !autoMap.isEmpty {
                             finalAligned = aligned.map { seg in
                                 var s = seg
-                                if let mappedName = autoMap[seg.speakerLabel] {
-                                    s.speakerLabel = mappedName
+                                if let match = autoMap[seg.speakerLabel] {
+                                    s.speakerLabel = match.name
+                                    s.contactId = match.contactId
                                 }
                                 return s
+                            }
+                            for (speakerId, match) in autoMap {
+                                self.addAttendee(match.name)
+                                // 保存声纹向量到联系人
+                                if let embedding = sharedEmbeddings.pointee?[speakerId] {
+                                    try? self.databaseManager.saveContactEmbedding(
+                                        contactId: match.contactId, embedding: embedding
+                                    )
+                                }
                             }
                         }
                         self.transcriptSegments = finalAligned.isEmpty ? self.transcriptSegments : finalAligned
@@ -277,7 +308,11 @@ final class RecordingViewModel {
                 _ = Task {
                     if let diarOutput = try? await DiarizationService.shared.diarizeWithEmbeddings(audioURL: audioURL) {
                         sharedDiar.pointee = diarOutput.segments
-                        log("声纹分离完毕: \(diarOutput.segments.count) 区间, 向量: \(diarOutput.speakerEmbeddings.count)个")
+                        sharedEmbeddings.pointee = diarOutput.speakerEmbeddings
+                        self.lastDiarEmbeddings = diarOutput.speakerEmbeddings
+                        // 立即保存声纹向量到数据库（防止重启丢失）
+                        try? self.databaseManager.saveMeetingEmbeddings(meetingId: meetingId, embeddings: diarOutput.speakerEmbeddings)
+                        log("声纹分离完毕: \(diarOutput.segments.count) 区间, 向量: \(diarOutput.speakerEmbeddings.count)个, 已存DB")
 
                         // 声纹匹配：与已知联系人比对
                         let knownContacts = self.databaseManager.fetchContactsWithEmbeddings()
@@ -286,15 +321,30 @@ final class RecordingViewModel {
                                 newEmbeddings: diarOutput.speakerEmbeddings,
                                 knownContacts: knownContacts
                             )
-                            var autoMap: [String: String] = [:]
+                            // 详细打印每个 speaker 的匹配结果
+                            for (speakerId, _) in diarOutput.speakerEmbeddings {
+                                var bestScore: Float = -1
+                                var bestName = ""
+                                for contact in knownContacts {
+                                    let score = DiarizationService.cosineSimilarity(
+                                        diarOutput.speakerEmbeddings[speakerId] ?? [],
+                                        contact.embedding
+                                    )
+                                    if score > bestScore { bestScore = score; bestName = contact.name }
+                                }
+                                if bestScore > 0.7 {
+                                    log("声纹匹配: \(speakerId)→\(bestName) (置信度:\(String(format:"%.2f",bestScore)))")
+                                } else {
+                                    log("声纹未匹配: \(speakerId) vs \(knownContacts.map{ $0.name }.joined(separator:",")) 最高分=\(String(format:"%.2f",bestScore))")
+                                }
+                            }
+
+                            var autoMap: [String: (name: String, contactId: String)] = [:]
                             for (speakerId, match) in matches where match.score > 0.7 {
-                                autoMap[speakerId] = match.contactName
-                                log("声纹匹配: \(speakerId)→\(match.contactName) (置信度: \(String(format:"%.2f",match.score)))")
-                                // 保存/更新声纹向量到联系人
+                                autoMap[speakerId] = (name: match.contactName, contactId: match.contactId)
                                 try? self.databaseManager.saveContactEmbedding(contactId: match.contactId, embedding: diarOutput.speakerEmbeddings[speakerId] ?? [])
                             }
                             if !autoMap.isEmpty { sharedSpeakerMap.pointee = autoMap }
-                            else { log("声纹匹配: 无高置信度匹配") }
                         } else {
                             log("声纹匹配跳过: 无已知联系人向量")
                         }
@@ -318,6 +368,14 @@ final class RecordingViewModel {
                     self.segmentCount = self.transcriptSegments.count
                     self.saveSegmentsToDatabase(meetingId: meetingId)
                     try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .completed)
+                    // 兜底：为所有已映射到联系人的 segment 保存声纹向量
+                    if let embeddings = sharedEmbeddings.pointee, !embeddings.isEmpty {
+                        for seg in self.transcriptSegments {
+                            if let cid = seg.contactId, let emb = embeddings[seg.speakerLabel] ?? embeddings.first(where: { $0.key.contains(seg.speakerLabel) })?.value {
+                                try? self.databaseManager.saveContactEmbedding(contactId: cid, embedding: emb)
+                            }
+                        }
+                    }
                     log("全部完成: meetingId=\(meetingId) status=completed")
                 }
             } catch is CancellationError {
@@ -406,21 +464,21 @@ final class RecordingViewModel {
     /// 更新当前会议的元数据并写入数据库 (非模态修改用)
     func addAttendee(_ name: String) {
         guard var meeting = currentMeeting else {
-            print("[VM] addAttendee FAILED: currentMeeting is nil")
             return
         }
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         let current = meeting.attendees ?? ""
         var list = current.isEmpty ? [] : current.split(separator: " ").map(String.init)
-        guard !list.contains(trimmed) else {
-            print("[VM] addAttendee SKIP: \(trimmed) already in list (\(current))")
-            return
-        }
+        guard !list.contains(trimmed) else { return }
         list.append(trimmed)
         let newList = list.joined(separator: " ")
         meeting.attendees = newList
         currentMeeting = meeting
+        if databaseManager.fetchContact(byName: trimmed) == nil {
+            let contact = Contact.create(name: trimmed)
+            try? databaseManager.saveContact(contact)
+        }
         do {
             try databaseManager.updateMeetingInfo(
                 id: meeting.id,
@@ -429,9 +487,37 @@ final class RecordingViewModel {
                 createdAt: meeting.createdAt,
                 attendees: newList
             )
-            print("[VM] addAttendee DONE: \(trimmed) → list: \(newList)")
         } catch {
             print("[VM] addAttendee DB FAILED: \(error)")
+        }
+    }
+
+    /// 将最近声纹分离的向量保存到指定联系人
+    func saveEmbeddingForSpeaker(speakerLabel: String, contactId: String) {
+        var embeddings = lastDiarEmbeddings ?? [:]
+        // 如果内存没有，从 DB 加载（App 重启后恢复）
+        if embeddings.isEmpty, let meetingId = currentMeeting?.id {
+            embeddings = databaseManager.fetchMeetingEmbeddings(meetingId: meetingId)
+        }
+        guard !embeddings.isEmpty else {
+            let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding SKIP: no embeddings for \(speakerLabel)\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            }
+            return
+        }
+        if let emb = embeddings[speakerLabel] {
+            try? databaseManager.saveContactEmbedding(contactId: contactId, embedding: emb)
+            let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding OK: \(speakerLabel) → \(emb.count)维\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            }
+        } else if let (key, emb) = embeddings.first {
+            try? databaseManager.saveContactEmbedding(contactId: contactId, embedding: emb)
+            let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding via \(key): \(emb.count)维\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            }
         }
     }
 
@@ -614,13 +700,33 @@ final class RecordingViewModel {
     /// 全局重命名说话人（并同步更新所有相关片段）
     func globalRenameSpeaker(oldName: String, newName: String, contactId: String? = nil) {
         guard oldName != newName else { return }
+        let log = { (msg: String) in
+            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
+            let line = "\(df.string(from: Date())) [Rename] \(msg)\n"
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                h.seekToEndOfFile(); h.write(d); h.closeFile()
+            }
+        }
+        var cid = contactId
+        if cid == nil, let contact = databaseManager.fetchContact(byName: newName) {
+            cid = contact.id
+            log("找到已有联系人: \(oldName)→\(newName), contactId=\(contact.id)")
+        } else if cid == nil {
+            let contact = Contact.create(name: newName)
+            try? databaseManager.saveContact(contact)
+            cid = contact.id
+            log("新建联系人: \(oldName)→\(newName), contactId=\(contact.id)")
+        }
         for i in 0..<transcriptSegments.count {
             if transcriptSegments[i].speakerLabel == oldName {
                 transcriptSegments[i].speakerLabel = newName
-                if let cid = contactId {
-                    transcriptSegments[i].contactId = cid
+                if let id = cid {
+                    transcriptSegments[i].contactId = id
                 }
             }
+        }
+        if let id = cid {
+            saveEmbeddingForSpeaker(speakerLabel: oldName, contactId: id)
         }
     }
 

@@ -207,8 +207,8 @@ struct TranscriptRow: View {
                 Spacer().frame(width: 42)  // 时间戳宽度
                 TextEditor(text: $editText)
                     .font(.body).scrollContentBackground(.hidden)
-                    .scrollIndicators(.hidden)
-                    .frame(minHeight: 22, maxHeight: 100)
+                    .scrollIndicators(.never)
+                    .frame(minHeight: 22)
                 .onChange(of: editText) { _, newValue in
                     if skipNextNewlineCheck { skipNextNewlineCheck = false; return }
                     if newValue.contains("\n") {

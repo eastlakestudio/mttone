@@ -9,13 +9,13 @@ struct NewMeetingSheet: View {
 
     @State private var locationSuggestions: [String] = []
     @State private var showLocationSuggestions = false
-    @State private var attendeeText = ""
     @State private var attendees: [String] = []
-    @State private var speakerSuggestions: [String] = []
     @State private var recentMeetings: [Meeting] = []
     @State private var tempSelectedAudioURL: URL? = nil
     @State private var originalAudioFileName: String = ""
     @State private var showDatePickerPopover = false
+
+    @State private var showMultiSelectPopover = false
 
     private var formattedFormDate: String {
         let formatter = DateFormatter()
@@ -126,7 +126,7 @@ struct NewMeetingSheet: View {
                     }
                 }
 
-                // 3. 参会人
+                // 3. 参会人（从全局人员库多选）
                 VStack(alignment: .leading, spacing: 6) {
                     Text("参会人")
                         .font(.caption)
@@ -136,67 +136,41 @@ struct NewMeetingSheet: View {
                         FlowLayout(spacing: 6) {
                             ForEach(attendees, id: \.self) { person in
                                 HStack(spacing: 4) {
-                                    Text(person)
-                                        .font(.caption)
+                                    Text(person).font(.caption)
                                     Button {
                                         attendees.removeAll { $0 == person }
                                     } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.caption2)
-                                    }
-                                    .buttonStyle(.plain)
+                                        Image(systemName: "xmark.circle.fill").font(.caption2)
+                                    }.buttonStyle(.plain)
                                 }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.purple.opacity(0.1))
-                                .clipShape(Capsule())
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.purple.opacity(0.1)).clipShape(Capsule())
                             }
                         }
                     }
 
-                    HStack {
-                        TextField("添加参会人", text: $attendeeText)
-                            .textFieldStyle(.plain)
-                            .padding(10)
-                            .background(.quaternary.opacity(0.5))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .onSubmit { addAttendee() }
-
-                        if !attendeeText.isEmpty {
-                            Button { addAttendee() } label: {
-                                Image(systemName: "plus.circle.fill")
-                                    .foregroundStyle(.purple)
-                            }
-                            .buttonStyle(.plain)
+                    Button {
+                        showMultiSelectPopover = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "person.3.sequence").font(.caption)
+                            Text("从全局人员库选择...")
+                                .font(.subheadline)
+                            Spacer()
                         }
+                        .padding(10)
+                        .background(.quaternary.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-
-                    if !attendeeText.isEmpty {
-                        let filtered = speakerSuggestions.filter {
-                            $0.lowercased().contains(attendeeText.lowercased())
-                                && !attendees.contains($0)
-                        }
-                        if !filtered.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(filtered.prefix(8), id: \.self) { name in
-                                        Button {
-                                            attendees.append(name)
-                                            attendeeText = ""
-                                        } label: {
-                                            Text(name)
-                                                .font(.caption)
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 4)
-                                                .background(.quaternary.opacity(0.5))
-                                                .clipShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(.horizontal, 2)
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showMultiSelectPopover) {
+                        MultiSelectContactPicker(
+                            selectedNames: Set(attendees),
+                            onConfirm: { names in
+                                attendees = Array(names)
+                                showMultiSelectPopover = false
                             }
-                        }
+                        )
                     }
                 }
 
@@ -343,7 +317,6 @@ struct NewMeetingSheet: View {
         .frame(minWidth: 440, idealWidth: 480)
         .onAppear {
             locationSuggestions = databaseManager.fetchDistinctLocations()
-            speakerSuggestions = databaseManager.fetchDistinctSpeakers()
             if !viewModel.formAttendees.isEmpty {
                 attendees = viewModel.formAttendees
                     .split(separator: " ")
@@ -361,15 +334,6 @@ struct NewMeetingSheet: View {
                 try? FileManager.default.removeItem(at: tempURL)
             }
         }
-    }
-
-    private func addAttendee() {
-        let trimmed = attendeeText.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        if !attendees.contains(trimmed) {
-            attendees.append(trimmed)
-        }
-        attendeeText = ""
     }
 
     private func meetingPickerTitle(for meeting: Meeting) -> String {

@@ -20,6 +20,7 @@ struct MeetingInfoSidebar: View {
     @State private var showContactPicker = false
     @State private var attendeeSearchText = ""
     @State private var showNewContactSheet = false
+    @State private var showMultiSelectPopover = false
 
     var showSpeakerSections: Bool = true
 
@@ -169,6 +170,24 @@ struct MeetingInfoSidebar: View {
                 Button { showNewContactSheet = true } label: {
                     Image(systemName: "person.badge.plus").foregroundStyle(.purple)
                 }.buttonStyle(.plain).help("新建人员")
+
+                Button { showMultiSelectPopover = true } label: {
+                    Image(systemName: "list.bullet.rectangle").foregroundStyle(.purple)
+                }.buttonStyle(.plain).help("从全局人员库多选")
+                .popover(isPresented: $showMultiSelectPopover) {
+                    MultiSelectContactPicker(
+                        selectedNames: Set(editedAttendeesList),
+                        onConfirm: { names in
+                            let current = editedAttendeesList
+                            var all = current
+                            for name in names where !current.contains(name) {
+                                all.append(name)
+                            }
+                            saveMetadata(updatedAttendees: all.joined(separator: " "))
+                            showMultiSelectPopover = false
+                        }
+                    )
+                }
             }
 
             // 搜索结果下拉
@@ -356,6 +375,14 @@ struct MeetingInfoSidebar: View {
         let loc = editedLocation.trimmingCharacters(in: .whitespaces)
         let location = loc.isEmpty ? nil : loc
         let attendeesStr = updatedAttendees ?? attendeesString
+        // 新增参会人时同步创建全局联系人
+        if let updated = updatedAttendees {
+            let before = Set(attendeesString.split(separator: " ").map(String.init))
+            let after = Set(updated.split(separator: " ").map(String.init))
+            for name in after.subtracting(before) where databaseManager.fetchContact(byName: name) == nil {
+                try? databaseManager.saveContact(Contact.create(name: name))
+            }
+        }
         let duration = max(0, Int(editedEndedAt.timeIntervalSince(editedCreatedAt)))
         if updatedAttendees != nil { attendeesString = attendeesStr }
         viewModel.updateMeetingMetadata(
@@ -428,5 +455,101 @@ struct NewContactSheet: View {
             }
         }
         .padding().frame(width: 360)
+    }
+}
+
+struct MultiSelectContactPicker: View {
+    @Environment(DatabaseManager.self) private var db
+    @State private var contacts: [Contact] = []
+    @State private var selectedNames: Set<String>
+    @State private var searchText = ""
+    @State private var showNewContactInPicker = false
+    let onConfirm: (Set<String>) -> Void
+
+    init(selectedNames: Set<String>, onConfirm: @escaping (Set<String>) -> Void) {
+        self._selectedNames = State(initialValue: selectedNames)
+        self.onConfirm = onConfirm
+    }
+
+    private var filteredContacts: [Contact] {
+        let text = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        if text.isEmpty { return contacts }
+        return contacts.filter {
+            $0.name.lowercased().contains(text)
+            || ($0.company?.lowercased().contains(text) ?? false)
+            || ($0.role?.lowercased().contains(text) ?? false)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("选择参会人").font(.headline)
+                Spacer()
+            }.padding()
+
+            TextField("搜索...", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal)
+
+            Divider().padding(.vertical, 4)
+
+            if filteredContacts.isEmpty {
+                Text("无匹配人员").font(.subheadline).foregroundStyle(.secondary).padding()
+            } else {
+                List(filteredContacts, id: \.id) { contact in
+                    Button {
+                        if selectedNames.contains(contact.name) {
+                            selectedNames.remove(contact.name)
+                        } else {
+                            selectedNames.insert(contact.name)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: selectedNames.contains(contact.name) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selectedNames.contains(contact.name) ? .purple : .secondary)
+                            Text(contact.name).font(.subheadline)
+                            if let company = contact.company {
+                                Text(company).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if let role = contact.role {
+                                Text(role).font(.caption2).foregroundStyle(.purple)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
+            }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Button { showNewContactInPicker = true } label: {
+                    Label("新建", systemImage: "person.badge.plus").font(.caption)
+                }.buttonStyle(.borderless)
+                Text("已选 \(selectedNames.count) 人").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("取消") { onConfirm([]) }.buttonStyle(.borderless)
+                Button("确认") { onConfirm(selectedNames) }
+                    .buttonStyle(.borderedProminent).tint(.purple).controlSize(.small)
+            }.padding()
+        }
+        .frame(width: 300, height: 400)
+        .onAppear { contacts = db.fetchAllContacts() }
+        .sheet(isPresented: $showNewContactInPicker) {
+            NewContactSheet(
+                onSave: { contact in
+                    try? db.saveContact(contact)
+                    selectedNames.insert(contact.name)
+                    contacts = db.fetchAllContacts()
+                    showNewContactInPicker = false
+                },
+                onCancel: { showNewContactInPicker = false }
+            )
+        }
     }
 }
