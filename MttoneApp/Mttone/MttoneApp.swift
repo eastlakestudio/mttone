@@ -7,6 +7,7 @@ struct MttoneApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .frame(minWidth: 960, minHeight: 760)
                 .environment(databaseManager)
                 .task {
                     // 软件启动时后台预加载大模型，实现秒开录音

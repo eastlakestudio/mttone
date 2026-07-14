@@ -14,9 +14,11 @@ final class DatabaseManagerTests: XCTestCase {
 
         let meetings = db.fetchAllMeetings()
         XCTAssertFalse(meetings.isEmpty)
-        XCTAssertEqual(meetings.first?.title, "测试会议")
-        XCTAssertEqual(meetings.first?.location, "会议室 A")
-        XCTAssertEqual(meetings.first?.status, .pendingDiarization)
+        let found = meetings.first { $0.id == meeting.id }
+        XCTAssertNotNil(found)
+        XCTAssertEqual(found?.title, "测试会议")
+        XCTAssertEqual(found?.location, "会议室 A")
+        XCTAssertEqual(found?.status, .pendingDiarization)
     }
 
     func testMeetingStatusUpdate() throws {

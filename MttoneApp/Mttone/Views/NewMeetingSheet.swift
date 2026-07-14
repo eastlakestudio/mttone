@@ -35,17 +35,34 @@ struct NewMeetingSheet: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 16) {
-                // 1. 会议主题 (独占一行)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("会议主题")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // 1. 会议语言 与 会议主题 (共用一行)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("会议语言")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        Picker("", selection: $viewModel.formSpeechLang) {
+                            Text("中文").tag("zh")
+                            Text("English").tag("en")
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 160)
+                        .padding(.vertical, 4)
+                    }
                     
-                    TextField("输入会议主题", text: $viewModel.formTitle)
-                        .textFieldStyle(.plain)
-                        .padding(10)
-                        .background(.quaternary.opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("会议主题")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        TextField("输入会议主题", text: $viewModel.formTitle)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(.quaternary.opacity(0.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
                 }
 
                 // 2. 开始时间 与 会议地点 (共用一行)
@@ -249,15 +266,7 @@ struct NewMeetingSheet: View {
                           }
                       }
                       .frame(height: 32)
-                  }
-
-                  // 4.5 转写语言
-                  VStack(alignment: .leading, spacing: 6) {
-                      Text("转写语言").font(.caption).foregroundStyle(.secondary)
-                      Picker("", selection: $viewModel.formSpeechLang) {
-                          Text("中文").tag("zh")
-                          Text("English").tag("en")
-                      }.pickerStyle(.segmented).frame(width: 160)
+                      
                   }
 
                 // 5. 延续历史会议
