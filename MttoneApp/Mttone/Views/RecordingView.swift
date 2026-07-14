@@ -255,7 +255,7 @@ struct TranscriptBubble: View {
                         }
                     }
                     if !otherContacts.isEmpty {
-                        Section("声纹字典") {
+                        Section("全局人员") {
                             ForEach(otherContacts, id: \.self) { n in Button(n) { onSpeakerChange?(n) } }
                         }
                     }

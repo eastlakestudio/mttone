@@ -53,7 +53,6 @@ struct MeetingInfoSidebar: View {
                     locationField
                     attendeeField
                     if showSpeakerSections {
-                        speakerMatchingSection
                         speakerStatsSection
                     }
                 }.padding(.trailing, 2)
@@ -331,7 +330,7 @@ struct MeetingInfoSidebar: View {
 
                         Menu {
                             if !editedAttendeesList.isEmpty {
-                                Section("分配到参会人") {
+                                Section("重新分配到参会人") {
                                     ForEach(editedAttendeesList.filter { $0 != item.speaker }, id: \.self) { person in
                                         Button(person) {
                                             viewModel.globalRenameSpeaker(oldName: item.speaker, newName: person)

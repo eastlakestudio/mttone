@@ -42,7 +42,16 @@ struct MeetingListView: View {
             .navigationBarTitleDisplayMode(.large)
             #endif
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    NavigationLink(destination: SettingsView()) {
+                        Label("配置", systemImage: "gearshape")
+                    }
+
+                    NavigationLink(destination: PersonnelManagementView()) {
+                        Label("人员与声纹", systemImage: "person.3.sequence")
+                    }
+                    .help("全局人员与声纹管理")
+
                     Button {
                         recordingVM.onTapStartRecording()
                     } label: {
@@ -101,20 +110,6 @@ struct MeetingListView: View {
                 .foregroundStyle(.secondary)
                 
             Spacer()
-            
-            NavigationLink(destination: PersonnelManagementView()) {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.3.sequence.fill")
-                    Text("声纹字典")
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(.purple.opacity(0.1))
-                .foregroundStyle(.purple)
-                .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
             
             Text("本地离线会议纪要与声纹人脉库")
                 .font(.caption)

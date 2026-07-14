@@ -119,10 +119,11 @@ struct NewMeetingSheet: View {
                                             .clipShape(Capsule())
                                     }
                                     .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 2)
-                        }
+            }
+        }
+        .frame(minWidth: 440, idealWidth: 480)
+        .background(.regularMaterial)
+    }
                     }
                 }
 
@@ -248,6 +249,15 @@ struct NewMeetingSheet: View {
                           }
                       }
                       .frame(height: 32)
+                  }
+
+                  // 4.5 转写语言
+                  VStack(alignment: .leading, spacing: 6) {
+                      Text("转写语言").font(.caption).foregroundStyle(.secondary)
+                      Picker("", selection: $viewModel.formSpeechLang) {
+                          Text("中文").tag("zh")
+                          Text("English").tag("en")
+                      }.pickerStyle(.segmented).frame(width: 160)
                   }
 
                 // 5. 延续历史会议

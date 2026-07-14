@@ -14,6 +14,9 @@ struct ReviewingView: View {
     @State private var showDebugLog = false
     @State private var showRetryConfirm = false
     @State private var pendingRetryAction: (() -> Void)?
+    @State private var showLLMSummary = false
+    @State private var llmSummary = ""
+    @State private var isGeneratingSummary = false
 
     private var editedAttendeesList: [String] {
         let s = viewModel.currentMeeting?.attendees ?? ""
@@ -105,6 +108,17 @@ struct ReviewingView: View {
                             Spacer()
 
                             Button {
+                                generateLLMSummary()
+                            } label: {
+                                Label("AI纪要", systemImage: "sparkles")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.indigo)
+                            .controlSize(.small)
+                            .disabled(isGeneratingSummary || viewModel.transcriptSegments.isEmpty)
+
+                            Button {
                                 copyToClipboard()
                             } label: {
                                 Label("拷贝", systemImage: "doc.on.doc")
@@ -140,6 +154,10 @@ struct ReviewingView: View {
             #endif
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
+                    NavigationLink(destination: SettingsView()) {
+                        Label("配置", systemImage: "gearshape")
+                    }.help("系统配置")
+
                     NavigationLink(destination: PersonnelManagementView()) {
                         Label("人员与声纹", systemImage: "person.3.sequence")
                     }.help("全局人员与声纹管理")
@@ -171,6 +189,9 @@ struct ReviewingView: View {
                 if let seg = viewModel.transcriptSegments.first(where: { $0.startTime <= time && $0.endTime >= time }) {
                     activeSegmentId = seg.id
                 }
+            }
+            .sheet(isPresented: $showLLMSummary) {
+                LLMSummarySheet(summary: llmSummary, isLoading: isGeneratingSummary, onDismiss: { showLLMSummary = false })
             }
             .sheet(isPresented: $showDebugLog) {
                 DebugLogView()
@@ -415,6 +436,76 @@ struct ReviewingView: View {
         #endif
     }
 
+    private func generateLLMSummary() {
+        let defaults = UserDefaults.standard
+        let llmURL = defaults.string(forKey: "llm_url") ?? ""
+        let llmToken = defaults.string(forKey: "llm_token") ?? ""
+        let llmModel = defaults.string(forKey: "llm_model") ?? "gpt-4o"
+        guard !llmURL.isEmpty, !llmToken.isEmpty else {
+            llmSummary = "请先在系统配置中设置云端大语言模型的 API 地址和 Token。"
+            showLLMSummary = true
+            return
+        }
+
+        showLLMSummary = true
+        isGeneratingSummary = true
+        llmSummary = "正在生成会议纪要..."
+
+        let prompt = defaults.string(forKey: "summary_prompt") ?? ""
+        let promptText = prompt.isEmpty ? "请将以下会议记录整理成结构化的会议纪要。" : prompt
+
+        var transcript = ""
+        for seg in viewModel.transcriptSegments.filter({ $0.isFinal }) {
+            transcript += "[\(formatTime(seg.startTime))] \(seg.speakerLabel): \(seg.text)\n"
+        }
+
+        let body: [String: Any] = [
+            "model": llmModel,
+            "messages": [
+                ["role": "system", "content": promptText],
+                ["role": "user", "content": transcript]
+            ],
+            "temperature": 0.3
+        ]
+
+        guard let url = URL(string: llmURL.hasSuffix("/") ? llmURL + "chat/completions" : llmURL + "/chat/completions") else {
+            llmSummary = "无效的 API 地址"
+            isGeneratingSummary = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(llmToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let choices = json["choices"] as? [[String: Any]],
+                   let message = choices.first?["message"] as? [String: Any],
+                   let content = message["content"] as? String {
+                    await MainActor.run {
+                        llmSummary = content
+                        isGeneratingSummary = false
+                    }
+                } else {
+                    await MainActor.run {
+                        llmSummary = "LLM 返回格式异常"
+                        isGeneratingSummary = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    llmSummary = "请求失败: \(error.localizedDescription)"
+                    isGeneratingSummary = false
+                }
+            }
+        }
+    }
+
     private func formatTime(_ time: TimeInterval) -> String {
         let mins = Int(time) / 60
         let secs = Int(time) % 60
@@ -484,5 +575,46 @@ struct ReviewingView: View {
 
     private func addAttendeeFromTranscript(_ name: String) {
         viewModel.addAttendee(name)
+    }
+}
+
+struct LLMSummarySheet: View {
+    let summary: String
+    var isLoading: Bool
+    var onDismiss: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("AI 会议纪要").font(.headline)
+                Spacer()
+                Button { dismiss(); onDismiss() } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }.buttonStyle(.plain)
+            }.padding()
+
+            Divider()
+            if isLoading {
+                VStack(spacing: 16) {
+                    ProgressView().controlSize(.large)
+                    Text("正在生成会议纪要...").font(.subheadline).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                ScrollView {
+                    Text(summary).font(.body).frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+            }
+            Divider()
+            HStack {
+                Spacer()
+                Button("拷贝纪要") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summary, forType: .string)
+                }.buttonStyle(.bordered).controlSize(.small).disabled(isLoading)
+            }.padding()
+        }
+        .frame(minWidth: 500, minHeight: 400)
+        .background(.regularMaterial)
     }
 }

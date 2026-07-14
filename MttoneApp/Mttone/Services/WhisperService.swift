@@ -24,7 +24,7 @@ actor WhisperService {
     }
     
     /// 对保存的录音文件进行高精度离线转写
-    func transcribe(audioURL: URL, meetingId: String, onSegments: (([TranscriptSegment]) -> Void)? = nil) async throws -> [TranscriptSegment] {
+    func transcribe(audioURL: URL, meetingId: String, language: String = "zh", onSegments: (([TranscriptSegment]) -> Void)? = nil) async throws -> [TranscriptSegment] {
         // 强制确保模型已加载
         try await initialize()
         guard let pipe = pipe else {
@@ -55,7 +55,7 @@ actor WhisperService {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
             } else { try? line.write(toFile: "/tmp/mttone_diag.log", atomically: true, encoding: .utf8) }
         }
-        log("开始转写: \(audioURL.lastPathComponent), 模型=large-v3, lang=zh, temp=0.0")
+        log("开始转写: \(audioURL.lastPathComponent), 模型=large-v3, lang=\(language), temp=0.0")
 
         // 设置段发现回调，并统计回调次数
         var callbackCount = 0
@@ -82,7 +82,7 @@ actor WhisperService {
 
         let options = DecodingOptions(
             task: .transcribe,
-            language: "zh",
+            language: language,
             temperature: 0.0,
             temperatureFallbackCount: 0,
             sampleLength: 224,
@@ -133,14 +133,14 @@ actor WhisperService {
     
     /// 用于实时录音时的快速短句推理
     /// 传入音频缓冲区数组，返回转写出的连续文本
-    func transcribeLive(audioArray: [Float]) async throws -> String {
+    func transcribeLive(audioArray: [Float], language: String = "zh") async throws -> String {
         guard let pipe = pipe else {
             throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型尚未加载完成"])
         }
         
         let options = DecodingOptions(
             task: .transcribe,
-            language: "zh",
+            language: language,
             skipSpecialTokens: true,
             withoutTimestamps: false
         )

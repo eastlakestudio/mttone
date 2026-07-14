@@ -20,9 +20,10 @@ final class RecordingViewModel {
     var formTitle = ""
     var formLocation = ""
     var formAttendees = ""
-    var shouldExtendLastMeeting = false // 是否延续上一次会议的开关
+    var shouldExtendLastMeeting = false
     var selectedParentMeetingId: String? = nil
     var formCreatedAt = Date()
+    var formSpeechLang = UserDefaults.standard.string(forKey: "speech_language") ?? "zh"
 
     enum RecordingMode {
         case liveRecording
@@ -68,6 +69,9 @@ final class RecordingViewModel {
     /// 用户在弹窗中确认开始
     func startRecording() async {
         showNewMeetingSheet = false
+
+        // 保存转写语言选择
+        UserDefaults.standard.set(formSpeechLang, forKey: "speech_language")
 
         // 1. 请求权限
         let granted = await audioRecorder.requestPermissions()
@@ -298,8 +302,9 @@ final class RecordingViewModel {
                 try await WhisperService.shared.initialize()
                 try Task.checkCancellation()
 
+                let speechLang = UserDefaults.standard.string(forKey: "speech_language") ?? "zh"
                 async let whisperTask = WhisperService.shared.transcribe(
-                    audioURL: audioURL, meetingId: meetingId,
+                    audioURL: audioURL, meetingId: meetingId, language: speechLang,
                     onSegments: { partialSegments in
                         segmentQueue.async { pendingChunks.append(partialSegments) }
                     }
@@ -821,6 +826,7 @@ final class RecordingViewModel {
         selectedParentMeetingId = nil
         formCreatedAt = Date()
         recordingMode = .liveRecording
+        formSpeechLang = UserDefaults.standard.string(forKey: "speech_language") ?? "zh"
     }
 
     /// 双模态对齐聚类算法：将声纹分离出的纯时间区间，匹配到带有文字的时间区间上
