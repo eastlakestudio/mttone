@@ -76,7 +76,7 @@ final class RecordingViewModel {
         // 1. 请求权限
         let granted = await audioRecorder.requestPermissions()
         guard granted else {
-            errorAlert = audioRecorder.errorMessage ?? "权限被拒绝"
+            errorAlert = audioRecorder.errorMessage ?? loc("err_permission_denied")
             return
         }
 
@@ -102,7 +102,7 @@ final class RecordingViewModel {
         do {
             try databaseManager.createMeeting(meeting)
         } catch {
-            errorAlert = "创建会议失败: \(error.localizedDescription)"
+            errorAlert = "\(loc("err_create_meeting_failed")): \(error.localizedDescription)"
             return
         }
 
@@ -116,11 +116,23 @@ final class RecordingViewModel {
         if !formAttendees.isEmpty { contextualWords.append(contentsOf: formAttendees.split(separator: " ").map(String.init)) }
 
         do {
-            // 提前加载 Whisper 模型，以免在录音循环中报错“模型尚未加载完成”
+            // 提前加载 Whisper 模型，以免在录音循环中报错"模型尚未加载完成"
             try await WhisperService.shared.initialize()
+        } catch {
+            // 模型加载失败，给用户友好的中文提示
+            let settings = SettingsManager.shared
+            if settings.modelPath.isEmpty {
+                errorAlert = loc("err_model_not_downloaded")
+            } else {
+                errorAlert = "\(loc("err_model_load_failed"))\n\n\(error.localizedDescription)"
+            }
+            return
+        }
+        
+        do {
             try audioRecorder.startRecording(meetingId: meeting.id, savePath: audioPath, contextualStrings: contextualWords)
         } catch {
-            errorAlert = "启动录音失败: \(error.localizedDescription)"
+            errorAlert = "\(loc("err_start_record_failed"))\n\(error.localizedDescription)"
             return
         }
 
@@ -391,7 +403,7 @@ final class RecordingViewModel {
             } catch {
                 log("转写失败: \(error.localizedDescription)")
                 await MainActor.run {
-                    self.errorAlert = "离线大模型转写/分离失败:\n\(error.localizedDescription)"
+                    self.errorAlert = "\(loc("err_offline_transcribe_failed"))\n\n\(error.localizedDescription)"
                     self.saveSegmentsToDatabase(meetingId: meetingId)
                     try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .pendingDiarization)
                 }
@@ -404,7 +416,7 @@ final class RecordingViewModel {
             let ext = sourceURL.pathExtension.lowercased()
             let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
             guard allowedExts.contains(ext) else {
-                errorAlert = "不支持的音频格式: .\(ext)"
+                errorAlert = "\(loc("err_unsupported_audio_format")): .\(ext)"
                 return
             }
 
@@ -414,7 +426,7 @@ final class RecordingViewModel {
             do {
                 try FileManager.default.copyItem(at: sourceURL, to: destURL)
             } catch {
-                errorAlert = "文件复制失败: \(error.localizedDescription)"
+                errorAlert = "\(loc("err_file_copy_failed")): \(error.localizedDescription)"
                 return
             }
 
@@ -451,7 +463,7 @@ final class RecordingViewModel {
             do {
                 try databaseManager.createMeeting(meeting)
             } catch {
-                errorAlert = "创建会议失败: \(error.localizedDescription)"
+                errorAlert = "\(loc("err_create_meeting_failed")): \(error.localizedDescription)"
                 try? FileManager.default.removeItem(at: destURL)
                 return
             }

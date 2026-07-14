@@ -14,6 +14,7 @@ final class SettingsManagerTests: XCTestCase {
     
     override func tearDown() {
         SettingsManager.shared.defaults = .standard
+        KeychainHelper.delete(forKey: "llm_token")
         super.tearDown()
     }
     
@@ -56,10 +57,11 @@ final class SettingsManagerTests: XCTestCase {
         // 保存配置
         manager.save()
         
-        // 验证 UserDefaults 直接存储的值
+        // 验证 UserDefaults 直接存储的值（llmToken 已迁移到 Keychain，不再存于 UserDefaults）
         let defaults = testDefaults!
         XCTAssertEqual(defaults.string(forKey: "llm_url"), "https://api.deepseek.com/v1")
-        XCTAssertEqual(defaults.string(forKey: "llm_token"), "sk-test-token-123456")
+        XCTAssertNil(defaults.string(forKey: "llm_token")) // token 不在 UserDefaults 中
+        XCTAssertEqual(KeychainHelper.read(forKey: "llm_token"), "sk-test-token-123456") // token 在 Keychain 中
         XCTAssertEqual(defaults.string(forKey: "llm_model"), "deepseek-chat")
         XCTAssertEqual(defaults.string(forKey: "voice_model"), "openai/whisper-large-v3-turbo")
         XCTAssertFalse(defaults.bool(forKey: "use_china_mirror"))

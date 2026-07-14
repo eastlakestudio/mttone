@@ -13,9 +13,26 @@ let zhLocale: [String: String] = [
     "cache": "缓存", "model_label": "模型", "redownload": "重新下载",
     "china_mirror": "HF-Mirror", "huggingface": "HuggingFace",
     "about_desc": "本地离线会议纪要系统  |  WhisperKit + FluidAudio",
-    "copyright": "© 2024-2026 Eastlake Studio",
+    "copyright": "© 2026 Eastlake Studio",
     "model_name": "模型名称",
     "zhipu": "智谱AI",
+    "err_no_path": "请先选择有效的缓存文件夹",
+    "err_model_not_downloaded": "语音模型未下载\n请前往「系统配置」选择存储路径并下载模型",
+    "err_model_load_failed": "语音模型加载失败\n请前往「系统配置」重新下载模型",
+    "err_start_record_failed": "启动录音失败",
+    "err_offline_transcribe_failed": "离线转写失败\n可尝试在「系统配置」中重新下载模型",
+    "err_download_failed": "模型下载失败",
+    "err_retry_hint": "可尝试在「系统配置」中重新下载模型",
+    "err_permission_denied": "权限被拒绝",
+    "err_create_meeting_failed": "创建会议失败",
+    "err_unsupported_audio_format": "不支持的音频格式",
+    "err_file_copy_failed": "文件复制失败",
+    "downloading": "下载中...",
+    "click_to_download": "点击下载",
+    "not_downloaded": "未下载",
+    "voice_model_not_ready": "语音模型未下载",
+    "voice_model_ready": "已就绪",
+    "model_downloading": "正在下载语音模型...",
 ]
 let enLocale: [String: String] = [
     "settings": "Settings", "save": "Save",
@@ -23,9 +40,26 @@ let enLocale: [String: String] = [
     "cache": "Cache", "model_label": "Model", "redownload": "Re-download",
     "china_mirror": "HF-Mirror", "huggingface": "HuggingFace",
     "about_desc": "Offline Meeting Minutes  |  WhisperKit + FluidAudio",
-    "copyright": "© 2024-2026 Eastlake Studio",
+    "copyright": "© 2026 Eastlake Studio",
     "model_name": "Model Name",
     "zhipu": "Zhipu AI",
+    "err_no_path": "Please select a valid cache folder first",
+    "err_model_not_downloaded": "Voice model not downloaded\nPlease go to Settings to select a storage path and download the model",
+    "err_model_load_failed": "Voice model failed to load\nPlease go to Settings to re-download the model",
+    "err_start_record_failed": "Failed to start recording",
+    "err_offline_transcribe_failed": "Offline transcription failed\nTry re-downloading the model in Settings",
+    "err_download_failed": "Model download failed",
+    "err_retry_hint": "Try re-downloading the model in Settings",
+    "err_permission_denied": "Permission denied",
+    "err_create_meeting_failed": "Failed to create meeting",
+    "err_unsupported_audio_format": "Unsupported audio format",
+    "err_file_copy_failed": "File copy failed",
+    "downloading": "Downloading...",
+    "click_to_download": "Download",
+    "not_downloaded": "Not downloaded",
+    "voice_model_not_ready": "Voice model not downloaded",
+    "voice_model_ready": "Ready",
+    "model_downloading": "Downloading voice model...",
 ]
 
 struct VoicePreset: Identifiable { let id = UUID(); let name: String; let size: String }
@@ -34,9 +68,6 @@ struct SettingsView: View {
     @State private var settings = SettingsManager.shared
     @State private var showLangPicker = false
     @State private var showSavedToast = false
-    @State private var isDownloadingModel = false
-    @State private var downloadProgress = 0.0
-    @State private var downloadError: String? = nil
     @State private var downloadTask: Task<Void, Never>? = nil
 
     private let voices = [
@@ -166,30 +197,30 @@ struct SettingsView: View {
                                     Spacer().frame(width: 16)
                                     
                                     HStack(spacing: 4) {
-                                        if isModelDownloaded {
-                                            Circle().fill(Color.green).frame(width: 6, height: 6)
-                                            Text(loc("downloaded"))
-                                                .font(.caption)
-                                                .fontWeight(.medium)
-                                                .foregroundStyle(.green)
-                                        } else if isDownloadingModel {
+                                        if settings.isModelDownloading {
                                             ProgressView()
                                                 .controlSize(.small)
                                                 .frame(width: 12, height: 12)
-                                            Text(String(format: "%.0f%%", downloadProgress * 100))
+                                            Text(String(format: "%.0f%%", settings.modelDownloadProgress * 100))
                                                 .font(.caption)
                                                 .fontWeight(.medium)
                                                 .foregroundStyle(.blue)
                                             Button {
                                                 downloadTask?.cancel()
                                                 downloadTask = nil
-                                                isDownloadingModel = false
+                                                settings.isModelDownloading = false
                                             } label: {
                                                 Image(systemName: "xmark.circle.fill")
                                                     .foregroundStyle(.red)
                                                     .font(.caption)
                                             }
                                             .buttonStyle(.plain)
+                                        } else if isModelDownloaded {
+                                            Circle().fill(Color.green).frame(width: 6, height: 6)
+                                            Text(loc("downloaded"))
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundStyle(.green)
                                         } else {
                                             Circle().fill(Color.red).frame(width: 6, height: 6)
                                             Text("未下载")
@@ -199,7 +230,7 @@ struct SettingsView: View {
                                         }
                                     }
                                     .frame(width: 135, height: 26, alignment: .center)
-                                    .background(isModelDownloaded ? Color.green.opacity(0.12) : (isDownloadingModel ? Color.blue.opacity(0.12) : Color.red.opacity(0.12)))
+                                    .background(isModelDownloaded ? Color.green.opacity(0.12) : (settings.isModelDownloading ? Color.blue.opacity(0.12) : Color.red.opacity(0.12)))
                                     .cornerRadius(20)
                                 }
                                 
@@ -244,7 +275,7 @@ struct SettingsView: View {
                                     
                                     Button(action: downloadModel) {
                                         HStack(spacing: 4) {
-                                            if isDownloadingModel {
+                                            if settings.isModelDownloading {
                                                 ProgressView().controlSize(.small).frame(width: 12, height: 12)
                                                 Text("下载中...")
                                                     .font(.caption)
@@ -257,15 +288,15 @@ struct SettingsView: View {
                                             }
                                         }
                                         .frame(width: 135, height: 26, alignment: .center)
-                                        .background(isDownloadingModel ? Color.gray.opacity(0.12) : (isModelDownloaded ? Color.orange.opacity(0.12) : Color.blue.opacity(0.12)))
-                                        .foregroundStyle(isDownloadingModel ? .gray : (isModelDownloaded ? .orange : .blue))
+                                        .background(settings.isModelDownloading ? Color.gray.opacity(0.12) : (isModelDownloaded ? Color.orange.opacity(0.12) : Color.blue.opacity(0.12)))
+                                        .foregroundStyle(settings.isModelDownloading ? .gray : (isModelDownloaded ? .orange : .blue))
                                         .cornerRadius(20)
                                     }
-                                    .disabled(isDownloadingModel)
+                                    .disabled(settings.isModelDownloading)
                                     .buttonStyle(.plain)
                                 }
                                 
-                                if let err = downloadError {
+                                if let err = settings.modelDownloadError {
                                     HStack {
                                         Spacer().frame(width: labelWidth + 12)
                                         Text("下载失败: \(err)")
@@ -350,15 +381,40 @@ struct SettingsView: View {
         return voice.replacingOccurrences(of: "openai/", with: "openai_")
     }
     
+    /// 模型实际存储目录（modelPath 下的子路径）
+    private var modelRepoPath: String {
+        URL(fileURLWithPath: settings.modelPath)
+            .appendingPathComponent("models/argmaxinc/whisperkit-coreml").path
+    }
+    
     private var isModelDownloaded: Bool {
-        if settings.modelPath.isEmpty { return false }
+        if settings.modelPath.isEmpty {
+            print("[ModelCheck] modelPath is empty")
+            return false
+        }
         let id = modelID(for: settings.selectedVoice)
-        let modelURL = URL(fileURLWithPath: settings.modelPath).appendingPathComponent(id)
+        let repoPath = modelRepoPath
+        let modelURL = URL(fileURLWithPath: repoPath).appendingPathComponent(id)
+        print("[ModelCheck] selectedVoice=\(settings.selectedVoice), modelID=\(id), path=\(modelURL.path)")
         
         var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir), isDir.boolValue {
-            if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelURL.path), !contents.isEmpty {
-                return true
+        let exists = FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir)
+        print("[ModelCheck] exists=\(exists), isDir=\(isDir.boolValue)")
+        if exists && isDir.boolValue {
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelURL.path) {
+                print("[ModelCheck] dir has \(contents.count) items")
+                return !contents.isEmpty
+            }
+        }
+        // 兜底：扫描所有已知模型目录
+        for v in ["openai_whisper-large-v3", "openai_whisper-large-v3_turbo", "openai_whisper-medium"] {
+            let check = URL(fileURLWithPath: repoPath).appendingPathComponent(v)
+            var d: ObjCBool = false
+            if FileManager.default.fileExists(atPath: check.path, isDirectory: &d), d.boolValue {
+                if let c = try? FileManager.default.contentsOfDirectory(atPath: check.path), !c.isEmpty {
+                    print("[ModelCheck] Fallback: found model '\(v)' at \(check.path)")
+                    return true
+                }
             }
         }
         return false
@@ -370,53 +426,182 @@ struct SettingsView: View {
         }
         
         if settings.modelPath.isEmpty {
-            downloadError = "请先选择有效的缓存文件夹"
+            settings.modelDownloadError = loc("err_no_path")
             return
         }
         
-        isDownloadingModel = true
-        downloadProgress = 0.0
-        downloadError = nil
-        SettingsManager.shared.isModelDownloading = true
-        SettingsManager.shared.modelDownloadProgress = 0.0
+        let variant = modelID(for: settings.selectedVoice)
+        let endpoint = settings.useChinaMirror ? "https://hf-mirror.com" : "https://huggingface.co"
+        print("[Download] === 开始下载 ===")
+        print("[Download] selectedVoice: \(settings.selectedVoice)")
+        print("[Download] variant: \(variant)")
+        print("[Download] endpoint: \(endpoint)")
+        print("[Download] downloadBase: \(settings.modelPath)")
+        print("[Download] useChinaMirror: \(settings.useChinaMirror)")
+        
+        settings.isModelDownloading = true
+        settings.modelDownloadProgress = 0.0
+        settings.modelDownloadError = nil
+        settings.downloadingModelVoice = settings.selectedVoice
 
         downloadTask = Task {
-            do {
-                let variant = modelID(for: settings.selectedVoice)
-                let endpoint = settings.useChinaMirror ? "https://hf-mirror.com" : "https://huggingface.co"
+            let downloadURL = URL(fileURLWithPath: settings.modelPath)
+            var currentEndpoint = endpoint
+            var attemptCount = 0
+            let maxAttempts = settings.useChinaMirror ? 2 : 1
+            
+            while attemptCount < maxAttempts {
+                if Task.isCancelled { return }
+                attemptCount += 1
                 
-                _ = try await WhisperKit.download(
-                    variant: variant,
-                    downloadBase: URL(fileURLWithPath: settings.modelPath),
-                    endpoint: endpoint
-                ) { progress in
+                print("[Download] 尝试从 \(currentEndpoint) 下载 (第 \(attemptCount) 次)")
+                print("[Download] variant=\(variant), downloadBase=\(downloadURL.path)")
+                
+                do {
+                    // 设置下载超时（10 分钟）
+                    let downloadResult = try await withThrowingTaskGroup(of: URL.self) { group -> URL in
+                        group.addTask {
+                            return try await WhisperKit.download(
+                                variant: variant,
+                                downloadBase: downloadURL,
+                                endpoint: currentEndpoint
+                            ) { progress in
+                                if Task.isCancelled { return }
+                                DispatchQueue.main.async {
+                                    settings.modelDownloadProgress = progress.fractionCompleted
+                                }
+                            }
+                        }
+                        
+                        group.addTask {
+                            try await Task.sleep(nanoseconds: 600_000_000_000) // 10 分钟
+                            throw NSError(domain: "Download", code: -1, userInfo: [
+                                NSLocalizedDescriptionKey: "下载超时，请检查网络连接"
+                            ])
+                        }
+                        
+                        let result = try await group.next()
+                        group.cancelAll()
+                        return result!
+                    }
+                    
+                    print("[Download] 下载成功: \(downloadResult.path)")
+                    if Task.isCancelled { return }
+                    await WhisperService.shared.reset()
+                    
+                    DispatchQueue.main.async {
+                        self.downloadTask = nil
+                        settings.isModelDownloading = false
+                        settings.modelVersion = self.modelID(for: self.settings.selectedVoice)
+                        settings.modelDownloadError = nil
+                        print("[Download] === 下载完成, modelVersion=\(settings.modelVersion) ===")
+                    }
+                    return
+                    
+                } catch {
+                    print("[Download] 从 \(currentEndpoint) 下载失败: \(error.localizedDescription)")
+                    print("[Download] error type: \(type(of: error))")
+                    
+                    // 如果是 HF-Mirror 失败且还有重试机会，回退到 HuggingFace
+                    if settings.useChinaMirror && attemptCount < maxAttempts {
+                        print("[Download] HF-Mirror 失败，自动回退到 HuggingFace")
+                        currentEndpoint = "https://huggingface.co"
+                        DispatchQueue.main.async {
+                            settings.modelDownloadProgress = 0.0
+                        }
+                        continue
+                    }
+                    
+                    // 最终失败
                     if Task.isCancelled { return }
                     DispatchQueue.main.async {
-                        self.downloadProgress = progress.fractionCompleted
-                        SettingsManager.shared.modelDownloadProgress = progress.fractionCompleted
+                        settings.modelDownloadError = "\(loc("err_download_failed"))\n\(error.localizedDescription)\n(variant=\(variant))"
+                        self.downloadTask = nil
+                        settings.isModelDownloading = false
                     }
-                }
-                
-                if Task.isCancelled { return }
-                
-                await WhisperService.shared.reset()
-                
-                DispatchQueue.main.async {
-                    self.isDownloadingModel = false
-                    self.downloadTask = nil
-                    SettingsManager.shared.isModelDownloading = false
-                    SettingsManager.shared.modelVersion = self.modelID(for: self.settings.selectedVoice)
-                }
-            } catch {
-                if Task.isCancelled { return }
-                DispatchQueue.main.async {
-                    self.downloadError = error.localizedDescription
-                    self.isDownloadingModel = false
-                    self.downloadTask = nil
-                    SettingsManager.shared.isModelDownloading = false
+                    return
                 }
             }
         }
+    }
+    
+    /// 通过 HF-Mirror 的 /raw/ 端点下载模型文件，绕过 HubApi 的 metadata 校验
+    private func downloadViaMirror(
+        variant: String,
+        downloadBase: URL,
+        endpoint: String,
+        progressCallback: @escaping (Double) -> Void
+    ) async throws {
+        let repoId = "argmaxinc/whisperkit-coreml"
+        let repo = "models/\(repoId)"
+        
+        // 1. 从 API 获取文件列表
+        print("[Mirror] 获取文件列表...")
+        let apiURL = URL(string: "\(endpoint)/api/\(repo)/revision/main")!
+        let (data, _) = try await URLSession.shared.data(from: apiURL)
+        
+        struct Sibling: Decodable { let rfilename: String }
+        struct RepoResponse: Decodable { let siblings: [Sibling] }
+        
+        let response = try JSONDecoder().decode(RepoResponse.self, from: data)
+        let allFiles = response.siblings.map { $0.rfilename }
+        print("[Mirror] 仓库共有 \(allFiles.count) 个文件")
+        
+        // 2. 过滤出目标 variant 的文件
+        let pattern = "*\(variant)*"
+        let files = allFiles.filter { fnmatch(pattern, $0, 0) == 0 }
+        print("[Mirror] 匹配 \(pattern) 的文件: \(files.count) 个")
+        
+        guard !files.isEmpty else {
+            throw NSError(domain: "MirrorDownload", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "未找到匹配 \(pattern) 的文件"
+            ])
+        }
+        
+        // 3. 逐个下载文件
+        let destBase = downloadBase.appendingPathComponent(repo)
+        var downloadedCount = 0
+        
+        for file in files {
+            if Task.isCancelled { return }
+            
+            let fileURL = URL(string: "\(endpoint)/\(repo)/raw/main/\(file)")!
+            let destPath = destBase.appendingPathComponent(file)
+            
+            // 创建目录
+            let dir = destPath.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            
+            // 下载文件（带重试）
+            var lastError: Error? = nil
+            for attempt in 1...3 {
+                do {
+                    let (fileData, _) = try await URLSession.shared.data(from: fileURL)
+                    try fileData.write(to: destPath)
+                    break
+                } catch {
+                    lastError = error
+                    print("[Mirror] 文件 \(file) 下载失败 (尝试 \(attempt)/3): \(error.localizedDescription)")
+                    if attempt < 3 {
+                        try await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                    }
+                }
+            }
+            
+            if lastError != nil {
+                throw lastError!
+            }
+            
+            downloadedCount += 1
+            let progress = Double(downloadedCount) / Double(files.count)
+            progressCallback(progress)
+            
+            if downloadedCount % 10 == 0 || downloadedCount == files.count {
+                print("[Mirror] 进度: \(downloadedCount)/\(files.count) (\(Int(progress * 100))%)")
+            }
+        }
+        
+        print("[Mirror] 全部 \(downloadedCount) 个文件下载完成")
     }
 
     private func load() {
@@ -424,7 +609,7 @@ struct SettingsView: View {
         // 检测已下载的模型版本
         if !settings.modelPath.isEmpty {
             let variant = modelID(for: settings.selectedVoice)
-            let modelURL = URL(fileURLWithPath: settings.modelPath).appendingPathComponent(variant)
+            let modelURL = URL(fileURLWithPath: modelRepoPath).appendingPathComponent(variant)
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir), isDir.boolValue {
                 settings.modelVersion = variant

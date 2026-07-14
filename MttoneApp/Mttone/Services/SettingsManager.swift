@@ -4,6 +4,7 @@ import Observation
 @Observable
 final class SettingsManager {
     static let shared = SettingsManager()
+    static let settingsDidChangeNotification = Notification.Name("AuraNoteSettingsDidChange")
     
     var defaults: UserDefaults = .standard
     
@@ -15,7 +16,7 @@ final class SettingsManager {
     var langSetting: String = "" {
         didSet {
             defaults.set(langSetting, forKey: "ui_language")
-            NotificationCenter.default.post(name: NSNotification.Name("AuraNoteSettingsDidChange"), object: nil)
+            NotificationCenter.default.post(name: SettingsManager.settingsDidChangeNotification, object: nil)
         }
     }
     var modelPath: String = ""
@@ -23,6 +24,8 @@ final class SettingsManager {
     var useChinaMirror: Bool = true
     var isModelDownloading = false
     var modelDownloadProgress: Double = 0.0
+    var modelDownloadError: String? = nil
+    var downloadingModelVoice: String = ""  // 记录正在下载的模型
     var modelVersion = "" {
         didSet { if !modelVersion.isEmpty { defaults.set(modelVersion, forKey: "current_model_version") } }
     }
@@ -58,7 +61,17 @@ final class SettingsManager {
     func load() {
         let d = defaults
         llmURL = d.string(forKey: "llm_url") ?? ""
-        llmToken = d.string(forKey: "llm_token") ?? ""
+        // 从 Keychain 读取 token；同时兼容旧版 UserDefaults 迁移
+        if let keychainToken = KeychainHelper.read(forKey: "llm_token"), !keychainToken.isEmpty {
+            llmToken = keychainToken
+        } else if let oldToken = d.string(forKey: "llm_token"), !oldToken.isEmpty {
+            // 一次性迁移：从 UserDefaults 写入 Keychain
+            KeychainHelper.save(oldToken, forKey: "llm_token")
+            d.removeObject(forKey: "llm_token")
+            llmToken = oldToken
+        } else {
+            llmToken = ""
+        }
         llmModel = d.string(forKey: "llm_model") ?? "gpt-4o"
         
         let oldPrompt = d.string(forKey: "summary_prompt")
@@ -101,7 +114,8 @@ final class SettingsManager {
     func save() {
         let d = defaults
         d.set(llmURL, forKey: "llm_url")
-        d.set(llmToken, forKey: "llm_token")
+        // llmToken 存储在 Keychain 中，不写入 UserDefaults
+        KeychainHelper.save(llmToken, forKey: "llm_token")
         d.set(llmModel, forKey: "llm_model")
         
         d.set(summaryPromptZH, forKey: "summary_prompt_zh")
@@ -114,7 +128,7 @@ final class SettingsManager {
         d.set(selectedVoice, forKey: "voice_model")
         d.set(useChinaMirror, forKey: "use_china_mirror")
         
-        NotificationCenter.default.post(name: NSNotification.Name("MttoneSettingsDidChange"), object: nil)
+        NotificationCenter.default.post(name: SettingsManager.settingsDidChangeNotification, object: nil)
     }
     
     private func getSystemLanguage() -> String {

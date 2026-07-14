@@ -90,9 +90,11 @@ struct MeetingListView: View {
                 // 检测已下载的模型版本
                 let s = SettingsManager.shared
                 if s.modelVersion.isEmpty, !s.modelPath.isEmpty {
-                    // 尝试从路径检测
+                    // 尝试从路径检测（模型在 modelPath/models/argmaxinc/whisperkit-coreml/ 下）
+                    let repoPath = URL(fileURLWithPath: s.modelPath)
+                        .appendingPathComponent("models/argmaxinc/whisperkit-coreml").path
                     for v in ["openai_whisper-large-v3", "openai_whisper-large-v3_turbo", "openai_whisper-medium"] {
-                        let check = URL(fileURLWithPath: s.modelPath).appendingPathComponent(v)
+                        let check = URL(fileURLWithPath: repoPath).appendingPathComponent(v)
                         var isDir: ObjCBool = false
                         if FileManager.default.fileExists(atPath: check.path, isDirectory: &isDir), isDir.boolValue {
                             s.modelVersion = v
