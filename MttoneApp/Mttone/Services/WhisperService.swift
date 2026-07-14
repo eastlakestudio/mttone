@@ -8,6 +8,11 @@ actor WhisperService {
     private(set) var isReady = false
     private(set) var isLoading = false
     
+    private var defaultModelPath: String {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml").path
+    }
+
     /// 初始化并预加载模型
     func initialize() async throws {
         if isReady && pipe != nil { return }
@@ -17,10 +22,35 @@ actor WhisperService {
         let log = { (msg: String) in try? "[Whisper] \(msg)\n".data(using: .utf8).flatMap {
             let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log"); h?.seekToEndOfFile(); h?.write($0); h?.closeFile()
         } }
-        log("开始下载/加载 large-v3 模型 (~3GB)...")
-        self.pipe = try await WhisperKit(model: "openai_whisper-large-v3")
+        
+        let settings = SettingsManager.shared
+        var modelID = settings.selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
+        if settings.selectedVoice == "openai/whisper-large-v3-turbo" {
+            modelID = "openai_whisper-large-v3_turbo"
+        }
+        let basePath = settings.modelPath
+        if basePath.isEmpty {
+            log("错误: 模型缓存路径未设置，请在设置中选择路径并下载模型。")
+            throw NSError(domain: "WhisperService", code: 400, userInfo: [NSLocalizedDescriptionKey: "模型未下载，请前往系统设置选择路径并进行下载。"])
+        }
+        let endpoint = settings.useChinaMirror ? "https://hf-mirror.com" : "https://huggingface.co"
+        
+        log("开始加载/下载模型: \(modelID) (缓存路径: \(basePath), 源: \(endpoint))...")
+        
+        let config = WhisperKitConfig(
+            model: modelID,
+            downloadBase: URL(fileURLWithPath: basePath),
+            modelEndpoint: endpoint
+        )
+        self.pipe = try await WhisperKit(config)
         self.isReady = true
         log("模型加载完成!")
+    }
+    
+    /// 重置服务，以备重新载入新模型
+    func reset() {
+        self.pipe = nil
+        self.isReady = false
     }
     
     /// 对保存的录音文件进行高精度离线转写

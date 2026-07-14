@@ -1,4 +1,5 @@
 import SwiftUI
+import WhisperKit
 
 // MARK: - 国际化
 func loc(_ key: String) -> String {
@@ -41,6 +42,10 @@ struct SettingsView: View {
     @State private var showSavedToast = false
     @State private var showTokenDetails = false
     @State private var llmPresetIndex = 0
+    @State private var isDownloadingModel = false
+    @State private var downloadProgress = 0.0
+    @State private var downloadError: String? = nil
+    @State private var downloadTask: Task<Void, Never>? = nil
 
     private let voices = [
         VoicePreset(name: "openai/whisper-large-v3", size: "3.0 GB"),
@@ -176,14 +181,40 @@ struct SettingsView: View {
                                     Spacer().frame(width: 16)
                                     
                                     HStack(spacing: 4) {
-                                        Circle().fill(Color.green).frame(width: 6, height: 6)
-                                        Text(loc("downloaded"))
-                                            .font(.caption)
-                                            .fontWeight(.medium)
-                                            .foregroundStyle(.green)
+                                        if isModelDownloaded {
+                                            Circle().fill(Color.green).frame(width: 6, height: 6)
+                                            Text(loc("downloaded"))
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundStyle(.green)
+                                        } else if isDownloadingModel {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                                .frame(width: 12, height: 12)
+                                            Text(String(format: "%.0f%%", downloadProgress * 100))
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundStyle(.blue)
+                                            Button {
+                                                downloadTask?.cancel()
+                                                downloadTask = nil
+                                                isDownloadingModel = false
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundStyle(.red)
+                                                    .font(.caption)
+                                            }
+                                            .buttonStyle(.plain)
+                                        } else {
+                                            Circle().fill(Color.red).frame(width: 6, height: 6)
+                                            Text("未下载")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                                .foregroundStyle(.red)
+                                        }
                                     }
                                     .frame(width: 135, height: 26, alignment: .center)
-                                    .background(Color.green.opacity(0.12))
+                                    .background(isModelDownloaded ? Color.green.opacity(0.12) : (isDownloadingModel ? Color.blue.opacity(0.12) : Color.red.opacity(0.12)))
                                     .cornerRadius(20)
                                 }
                                 
@@ -195,10 +226,16 @@ struct SettingsView: View {
                                         .frame(width: labelWidth, alignment: .leading)
                                     
                                     HStack {
-                                        Text(settings.modelPath.isEmpty ? WhisperKitCachePath : settings.modelPath)
-                                            .font(.callout)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
+                                        if settings.modelPath.isEmpty {
+                                            Text("请选择存储路径")
+                                                .font(.callout)
+                                                .foregroundStyle(.gray.opacity(0.8))
+                                        } else {
+                                            Text(settings.modelPath)
+                                                .font(.callout)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                        }
                                         Spacer()
                                         Button(action: selectPath) {
                                             Image(systemName: "folder")
@@ -213,19 +250,37 @@ struct SettingsView: View {
                                     
                                     Spacer().frame(width: 16)
                                     
-                                    Button(action: {}) {
+                                    Button(action: downloadModel) {
                                         HStack(spacing: 4) {
-                                            Image(systemName: "arrow.clockwise")
-                                            Text(loc("redownload"))
-                                                .font(.caption)
-                                                .fontWeight(.medium)
+                                            if isDownloadingModel {
+                                                ProgressView().controlSize(.small).frame(width: 12, height: 12)
+                                                Text("下载中...")
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                            } else {
+                                                Image(systemName: isModelDownloaded ? "arrow.clockwise" : "arrow.down.to.line")
+                                                Text(isModelDownloaded ? loc("redownload") : "点击下载")
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                            }
                                         }
                                         .frame(width: 135, height: 26, alignment: .center)
-                                        .background(Color.orange.opacity(0.12))
-                                        .foregroundStyle(.orange)
+                                        .background(isDownloadingModel ? Color.gray.opacity(0.12) : (isModelDownloaded ? Color.orange.opacity(0.12) : Color.blue.opacity(0.12)))
+                                        .foregroundStyle(isDownloadingModel ? .gray : (isModelDownloaded ? .orange : .blue))
                                         .cornerRadius(20)
                                     }
+                                    .disabled(isDownloadingModel)
                                     .buttonStyle(.plain)
+                                }
+                                
+                                if let err = downloadError {
+                                    HStack {
+                                        Spacer().frame(width: labelWidth + 12)
+                                        Text("下载失败: \(err)")
+                                            .font(.caption)
+                                            .foregroundStyle(.red)
+                                        Spacer()
+                                    }
                                 }
                             }
                         }
@@ -442,6 +497,81 @@ struct SettingsView: View {
     private var WhisperKitCachePath: String {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("whisperkit").path
+    }
+    
+    private var defaultModelPath: String {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml").path
+    }
+    
+    private func modelID(for voice: String) -> String {
+        if voice == "openai/whisper-large-v3-turbo" {
+            return "openai_whisper-large-v3_turbo"
+        }
+        return voice.replacingOccurrences(of: "openai/", with: "openai_")
+    }
+    
+    private var isModelDownloaded: Bool {
+        if settings.modelPath.isEmpty { return false }
+        let id = modelID(for: settings.selectedVoice)
+        let modelURL = URL(fileURLWithPath: settings.modelPath).appendingPathComponent(id)
+        
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir), isDir.boolValue {
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelURL.path), !contents.isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+    
+    private func downloadModel() {
+        if settings.modelPath.isEmpty {
+            selectPath()
+        }
+        
+        if settings.modelPath.isEmpty {
+            downloadError = "请先选择有效的缓存文件夹"
+            return
+        }
+        
+        isDownloadingModel = true
+        downloadProgress = 0.0
+        downloadError = nil
+        
+        downloadTask = Task {
+            do {
+                let variant = modelID(for: settings.selectedVoice)
+                let endpoint = settings.useChinaMirror ? "https://hf-mirror.com" : "https://huggingface.co"
+                
+                _ = try await WhisperKit.download(
+                    variant: variant,
+                    downloadBase: URL(fileURLWithPath: settings.modelPath),
+                    endpoint: endpoint
+                ) { progress in
+                    if Task.isCancelled { return }
+                    DispatchQueue.main.async {
+                        self.downloadProgress = progress.fractionCompleted
+                    }
+                }
+                
+                if Task.isCancelled { return }
+                
+                await WhisperService.shared.reset()
+                
+                DispatchQueue.main.async {
+                    self.isDownloadingModel = false
+                    self.downloadTask = nil
+                }
+            } catch {
+                if Task.isCancelled { return }
+                DispatchQueue.main.async {
+                    self.downloadError = error.localizedDescription
+                    self.isDownloadingModel = false
+                    self.downloadTask = nil
+                }
+            }
+        }
     }
 
     private func load() {

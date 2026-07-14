@@ -27,6 +27,17 @@ final class SettingsManagerTests: XCTestCase {
         XCTAssertEqual(manager.llmModel, "gpt-4o")
         XCTAssertEqual(manager.selectedVoice, "openai/whisper-large-v3")
         XCTAssertTrue(manager.useChinaMirror)
+        
+        var isDir: ObjCBool = false
+        var hasDownloaded = false
+        let id = manager.selectedVoice == "openai/whisper-large-v3-turbo" ? "openai_whisper-large-v3_turbo" : manager.selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
+        let modelURL = URL(fileURLWithPath: manager.defaultModelPath).appendingPathComponent(id)
+        if FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir), isDir.boolValue {
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelURL.path), !contents.isEmpty {
+                hasDownloaded = true
+            }
+        }
+        XCTAssertEqual(manager.modelPath, hasDownloaded ? manager.defaultModelPath : "")
     }
     
     func testSettingsSaveAndLoad() {

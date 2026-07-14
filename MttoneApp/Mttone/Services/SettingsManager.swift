@@ -22,6 +22,11 @@ final class SettingsManager {
     var selectedVoice: String = "openai/whisper-large-v3"
     var useChinaMirror: Bool = true
     
+    var defaultModelPath: String {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml").path
+    }
+    
     var summaryPrompt: String {
         get {
             let activeLang = langSetting.isEmpty ? getSystemLanguage() : langSetting
@@ -66,9 +71,23 @@ final class SettingsManager {
         summaryPromptEN = enVal
         
         langSetting = d.string(forKey: "ui_language") ?? ""
-        modelPath = d.string(forKey: "model_path") ?? ""
         selectedVoice = d.string(forKey: "voice_model") ?? "openai/whisper-large-v3"
         useChinaMirror = d.object(forKey: "use_china_mirror") as? Bool ?? true
+        
+        let savedPath = d.string(forKey: "model_path") ?? ""
+        if savedPath.isEmpty {
+            let defaultModelID = selectedVoice == "openai/whisper-large-v3-turbo" ? "openai_whisper-large-v3_turbo" : selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
+            let defaultModelURL = URL(fileURLWithPath: defaultModelPath).appendingPathComponent(defaultModelID)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: defaultModelURL.path, isDirectory: &isDir), isDir.boolValue,
+               let contents = try? FileManager.default.contentsOfDirectory(atPath: defaultModelURL.path), !contents.isEmpty {
+                modelPath = defaultModelPath
+            } else {
+                modelPath = ""
+            }
+        } else {
+            modelPath = savedPath
+        }
     }
     
     func save() {
