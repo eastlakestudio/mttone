@@ -38,7 +38,7 @@ AuraNote is not intended for use by children under 13.
 
 ### Contact
 
-For privacy concerns, contact us at: eastlakestudio@outlook.com
+For privacy concerns, contact us at: mingh.liu@gmail.com
 
 ---
 
@@ -78,4 +78,4 @@ For privacy concerns, contact us at: eastlakestudio@outlook.com
 
 ### 联系方式
 
-隐私问题请联系：eastlakestudio@outlook.com
+隐私问题请联系：mingh.liu@gmail.com
