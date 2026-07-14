@@ -37,7 +37,7 @@ struct MeetingListView: View {
             #else
             .background(Color(uiColor: .systemGroupedBackground))
             #endif
-            .navigationTitle("Mttone")
+            .navigationTitle("听纪")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
@@ -60,6 +60,7 @@ struct MeetingListView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.purple)
+                    .disabled(SettingsManager.shared.isModelDownloading || SettingsManager.shared.modelVersion.isEmpty)
                 }
             }
             .sheet(isPresented: $recordingVM.showNewMeetingSheet) {
@@ -86,6 +87,19 @@ struct MeetingListView: View {
                 Text("\(permissionAlertMessage)\n\n请前往「系统设置 - 隐私与安全性 - 麦克风/语音识别」中开启权限。")
             }
             .onAppear {
+                // 检测已下载的模型版本
+                let s = SettingsManager.shared
+                if s.modelVersion.isEmpty, !s.modelPath.isEmpty {
+                    // 尝试从路径检测
+                    for v in ["openai_whisper-large-v3", "openai_whisper-large-v3_turbo", "openai_whisper-medium"] {
+                        let check = URL(fileURLWithPath: s.modelPath).appendingPathComponent(v)
+                        var isDir: ObjCBool = false
+                        if FileManager.default.fileExists(atPath: check.path, isDirectory: &isDir), isDir.boolValue {
+                            s.modelVersion = v
+                            break
+                        }
+                    }
+                }
                 if listVM == nil {
                     listVM = MeetingListViewModel(databaseManager: databaseManager)
                 }
@@ -102,19 +116,22 @@ struct MeetingListView: View {
     // MARK: - 子视图
 
     private var statusHeader: some View {
-        HStack {
-            Image(systemName: "bolt.fill")
-                .foregroundStyle(.green)
-            Text("准备就绪")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                
+        let settings = SettingsManager.shared
+        return HStack {
+            Image(systemName: "bolt.fill").foregroundStyle(.green)
+            Text("准备就绪").font(.subheadline).foregroundStyle(.secondary)
             Spacer()
-            
-            Text("本地离线会议纪要与声纹人脉库")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.leading, 8)
+            if settings.isModelDownloading {
+                ProgressView().scaleEffect(0.7)
+                Text("正在下载语音模型... \(Int(settings.modelDownloadProgress * 100))%")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if settings.modelVersion.isEmpty {
+                Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                Text("语音模型未下载").font(.caption).foregroundStyle(.orange)
+            } else {
+                Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                Text("\(settings.modelVersion) 已就绪").font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding()
         .background(.ultraThinMaterial)
@@ -146,7 +163,7 @@ struct MeetingListView: View {
                 let log = { (msg: String) in
                     let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
                     let line = "\(df.string(from: Date())) [Duration] \(msg)\n"
-                    if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+                    if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                         h.seekToEndOfFile(); h.write(d); h.closeFile()
                     }
                 }

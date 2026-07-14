@@ -61,9 +61,9 @@ actor DiarizationService {
         
         let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
         let line = "\(df.string(from: Date())) [Diar] \(msg)\n"
-        if let d = line.data(using: String.Encoding.utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+        if let d = line.data(using: String.Encoding.utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
             h.seekToEndOfFile(); h.write(d); h.closeFile()
-        } else { try? line.write(toFile: "/tmp/mttone_diag.log", atomically: true, encoding: String.Encoding.utf8) }
+        } else { try? line.write(toFile: "/tmp/auranote_diag.log", atomically: true, encoding: String.Encoding.utf8) }
         
         return DiarizationOutput(segments: segments, speakerEmbeddings: remappedDB)
     }

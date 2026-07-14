@@ -15,12 +15,17 @@ final class SettingsManager {
     var langSetting: String = "" {
         didSet {
             defaults.set(langSetting, forKey: "ui_language")
-            NotificationCenter.default.post(name: NSNotification.Name("MttoneSettingsDidChange"), object: nil)
+            NotificationCenter.default.post(name: NSNotification.Name("AuraNoteSettingsDidChange"), object: nil)
         }
     }
     var modelPath: String = ""
     var selectedVoice: String = "openai/whisper-large-v3"
     var useChinaMirror: Bool = true
+    var isModelDownloading = false
+    var modelDownloadProgress: Double = 0.0
+    var modelVersion = "" {
+        didSet { if !modelVersion.isEmpty { defaults.set(modelVersion, forKey: "current_model_version") } }
+    }
     
     var defaultModelPath: String {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -75,7 +80,12 @@ final class SettingsManager {
         useChinaMirror = d.object(forKey: "use_china_mirror") as? Bool ?? true
         
         let savedPath = d.string(forKey: "model_path") ?? ""
-        if savedPath.isEmpty {
+        if !savedPath.isEmpty && FileManager.default.fileExists(atPath: savedPath) {
+            modelPath = savedPath
+        } else {
+            // 清除无效的保存路径
+            if !savedPath.isEmpty { d.removeObject(forKey: "model_path") }
+            // 检查默认路径是否有模型
             let defaultModelID = selectedVoice == "openai/whisper-large-v3-turbo" ? "openai_whisper-large-v3_turbo" : selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
             let defaultModelURL = URL(fileURLWithPath: defaultModelPath).appendingPathComponent(defaultModelID)
             var isDir: ObjCBool = false
@@ -85,8 +95,6 @@ final class SettingsManager {
             } else {
                 modelPath = ""
             }
-        } else {
-            modelPath = savedPath
         }
     }
     

@@ -12,9 +12,6 @@ let zhLocale: [String: String] = [
     "speech_model": "语音识别模型", "downloaded": "已下载",
     "cache": "缓存", "model_label": "模型", "redownload": "重新下载",
     "china_mirror": "HF-Mirror", "huggingface": "HuggingFace",
-    "cloud_llm": "云端大语言模型", "not_configured": "未配置",
-    "url_address": "接口地址", "model": "模型", "token": "密钥 Token", "custom": "自定义",
-    "prompt": "会议纪要提示词", "reset_prompt": "重置默认提示词",
     "about_desc": "本地离线会议纪要系统  |  WhisperKit + FluidAudio",
     "copyright": "© 2024-2026 Eastlake Studio",
     "model_name": "模型名称",
@@ -25,9 +22,6 @@ let enLocale: [String: String] = [
     "speech_model": "Speech Recognition", "downloaded": "Downloaded",
     "cache": "Cache", "model_label": "Model", "redownload": "Re-download",
     "china_mirror": "HF-Mirror", "huggingface": "HuggingFace",
-    "cloud_llm": "Cloud LLM", "not_configured": "Not Configured",
-    "url_address": "API URL", "model": "Model", "token": "Token", "custom": "Custom",
-    "prompt": "Summary Prompt", "reset_prompt": "Reset Default",
     "about_desc": "Offline Meeting Minutes  |  WhisperKit + FluidAudio",
     "copyright": "© 2024-2026 Eastlake Studio",
     "model_name": "Model Name",
@@ -40,8 +34,6 @@ struct SettingsView: View {
     @State private var settings = SettingsManager.shared
     @State private var showLangPicker = false
     @State private var showSavedToast = false
-    @State private var showTokenDetails = false
-    @State private var llmPresetIndex = 0
     @State private var isDownloadingModel = false
     @State private var downloadProgress = 0.0
     @State private var downloadError: String? = nil
@@ -50,13 +42,6 @@ struct SettingsView: View {
     private let voices = [
         VoicePreset(name: "openai/whisper-large-v3", size: "3.0 GB"),
         VoicePreset(name: "openai/whisper-large-v3-turbo", size: "1.9 GB")
-    ]
-    private let llmPresets = [
-        ("openai/gpt-4o", "https://api.openai.com/v1", "gpt-4o"),
-        ("deepseek/deepseek-chat", "https://api.deepseek.com/v1", "deepseek-chat"),
-        ("alibaba/qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
-        ("zhipu/glm-4-flash", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
-        ("siliconflow/deepseek-ai/DeepSeek-V3", "https://api.siliconflow.cn/v1", "deepseek-ai/DeepSeek-V3"),
     ]
 
     private let labelWidth: CGFloat = 85
@@ -226,10 +211,17 @@ struct SettingsView: View {
                                         .frame(width: labelWidth, alignment: .leading)
                                     
                                     HStack {
+                                        let pathExists = !settings.modelPath.isEmpty && FileManager.default.fileExists(atPath: settings.modelPath)
                                         if settings.modelPath.isEmpty {
                                             Text("请选择存储路径")
                                                 .font(.callout)
                                                 .foregroundStyle(.gray.opacity(0.8))
+                                        } else if !pathExists {
+                                            Text("\(settings.modelPath) (不存在)")
+                                                .font(.callout)
+                                                .foregroundStyle(.red)
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
                                         } else {
                                             Text(settings.modelPath)
                                                 .font(.callout)
@@ -287,159 +279,6 @@ struct SettingsView: View {
                         .padding(20)
                         .background(RoundedRectangle(cornerRadius: 12).fill(.background.opacity(0.4)))
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                        
-                        // Card 2: 云端大语言模型
-                        VStack(alignment: .leading, spacing: 16) {
-                            Label(loc("cloud_llm"), systemImage: "cloud.fill")
-                                .font(.headline)
-                                .foregroundStyle(.blue)
-                            
-                            VStack(spacing: 12) {
-                                // Row 1: Model Selection + Model Name
-                                HStack(spacing: 24) {
-                                    // Left: Model Selection
-                                    HStack(spacing: 12) {
-                                        Text(loc("model"))
-                                            .font(.callout)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: labelWidth, alignment: .leading)
-                                        
-                                        Menu {
-                                            ForEach(0..<llmPresets.count, id: \.self) { i in
-                                                Button(llmPresets[i].0 == "智谱AI" ? loc("zhipu") : llmPresets[i].0) {
-                                                    llmPresetIndex = i
-                                                    settings.llmModel = llmPresets[i].2
-                                                    settings.llmURL = llmPresets[i].1
-                                                }
-                                            }
-                                            Divider()
-                                            Button(loc("custom")) {
-                                                llmPresetIndex = llmPresets.count
-                                            }
-                                        } label: {
-                                            HStack {
-                                                Text(llmPresetIndex < llmPresets.count ? (llmPresets[llmPresetIndex].0 == "智谱AI" ? loc("zhipu") : llmPresets[llmPresetIndex].0) : loc("custom"))
-                                                    .font(.callout)
-                                                    .foregroundStyle(.primary)
-                                                Spacer()
-                                                Image(systemName: "chevron.up.chevron.down")
-                                                    .font(.system(size: 10))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .frame(width: 360, height: 28)
-                                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-                                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 1))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .frame(width: 360, alignment: .leading)
-                                    }
-                                    
-                                    // Right: Model Name
-                                    HStack(spacing: 12) {
-                                        Text(loc("model_name"))
-                                            .font(.callout)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 75, alignment: .leading)
-                                        
-                                        TextField("gpt-4o", text: $settings.llmModel)
-                                            .textFieldStyle(.roundedBorder)
-                                            .font(.callout)
-                                            .disabled(llmPresetIndex != llmPresets.count)
-                                    }
-                                }
-                                .onChange(of: llmPresetIndex) { _, idx in
-                                    if idx < llmPresets.count {
-                                        settings.llmModel = llmPresets[idx].2
-                                        settings.llmURL = llmPresets[idx].1
-                                    }
-                                }
-                                
-                                // Row 2: API URL + Token
-                                HStack(spacing: 24) {
-                                    // Left: API URL
-                                    HStack(spacing: 12) {
-                                        Text(loc("url_address"))
-                                            .font(.callout)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: labelWidth, alignment: .leading)
-                                        
-                                        TextField("https://api.openai.com/v1", text: $settings.llmURL)
-                                            .textFieldStyle(.roundedBorder)
-                                            .font(.callout)
-                                            .disabled(llmPresetIndex != llmPresets.count)
-                                            .frame(width: 360)
-                                    }
-                                    
-                                    // Right: Token
-                                    HStack(spacing: 12) {
-                                        Text(loc("token"))
-                                            .font(.callout)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 75, alignment: .leading)
-                                        
-                                        HStack {
-                                            if showTokenDetails {
-                                                TextField("API Key / Token", text: $settings.llmToken)
-                                                    .textFieldStyle(.plain)
-                                                    .font(.system(.callout, design: .monospaced))
-                                            } else {
-                                                SecureField("API Key / Token", text: $settings.llmToken)
-                                                    .textFieldStyle(.plain)
-                                                    .font(.system(.callout, design: .monospaced))
-                                            }
-                                            Button { showTokenDetails.toggle() } label: {
-                                                Image(systemName: showTokenDetails ? "eye.slash" : "eye")
-                                                    .font(.callout)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.12), lineWidth: 1))
-                                    }
-                                }
-                            }
-                        }
-                        .padding(20)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(.background.opacity(0.4)))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                        
-                        // Card 3: 会议纪要提示词
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Label(loc("prompt"), systemImage: "text.bubble.fill")
-                                    .font(.headline)
-                                    .foregroundStyle(.indigo)
-                                
-                                Spacer()
-                                
-                                Button(action: resetCurrentPrompt) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "arrow.counterclockwise")
-                                        Text(loc("reset_prompt"))
-                                    }
-                                    .font(.caption)
-                                    .foregroundStyle(.purple)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            
-                            TextEditor(text: $settings.summaryPrompt)
-                                .font(.callout)
-                                .scrollContentBackground(.hidden)
-                                .scrollIndicators(.never)
-                                .padding(10)
-                                .frame(minHeight: 120)
-                                .background(Color.primary.opacity(0.04))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 1))
-                        }
-                        .padding(20)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(.background.opacity(0.4)))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08), lineWidth: 1))
                     }
                     .padding(.horizontal, 24)
                 }
@@ -448,7 +287,7 @@ struct SettingsView: View {
                 
                 // About Footer
                 VStack(spacing: 4) {
-                    Text("Mttone v1.4.0")
+                    Text("AuraNote v1.4.0")
                         .font(.caption)
                         .fontWeight(.semibold)
                     Text(loc("about_desc"))
@@ -538,7 +377,9 @@ struct SettingsView: View {
         isDownloadingModel = true
         downloadProgress = 0.0
         downloadError = nil
-        
+        SettingsManager.shared.isModelDownloading = true
+        SettingsManager.shared.modelDownloadProgress = 0.0
+
         downloadTask = Task {
             do {
                 let variant = modelID(for: settings.selectedVoice)
@@ -552,6 +393,7 @@ struct SettingsView: View {
                     if Task.isCancelled { return }
                     DispatchQueue.main.async {
                         self.downloadProgress = progress.fractionCompleted
+                        SettingsManager.shared.modelDownloadProgress = progress.fractionCompleted
                     }
                 }
                 
@@ -562,6 +404,8 @@ struct SettingsView: View {
                 DispatchQueue.main.async {
                     self.isDownloadingModel = false
                     self.downloadTask = nil
+                    SettingsManager.shared.isModelDownloading = false
+                    SettingsManager.shared.modelVersion = self.modelID(for: self.settings.selectedVoice)
                 }
             } catch {
                 if Task.isCancelled { return }
@@ -569,6 +413,7 @@ struct SettingsView: View {
                     self.downloadError = error.localizedDescription
                     self.isDownloadingModel = false
                     self.downloadTask = nil
+                    SettingsManager.shared.isModelDownloading = false
                 }
             }
         }
@@ -576,10 +421,14 @@ struct SettingsView: View {
 
     private func load() {
         settings.load()
-        if let idx = llmPresets.firstIndex(where: { $0.2 == settings.llmModel }) {
-            llmPresetIndex = idx
-        } else {
-            llmPresetIndex = llmPresets.count
+        // 检测已下载的模型版本
+        if !settings.modelPath.isEmpty {
+            let variant = modelID(for: settings.selectedVoice)
+            let modelURL = URL(fileURLWithPath: settings.modelPath).appendingPathComponent(variant)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir), isDir.boolValue {
+                settings.modelVersion = variant
+            }
         }
     }
     
@@ -602,15 +451,6 @@ struct SettingsView: View {
         panel.directoryURL = URL(fileURLWithPath: settings.modelPath.isEmpty ? NSHomeDirectory() : settings.modelPath)
         if panel.runModal() == .OK, let url = panel.url {
             settings.modelPath = url.path
-        }
-    }
-    
-    private func resetCurrentPrompt() {
-        let activeLang = settings.langSetting.isEmpty ? (Bundle.main.preferredLocalizations.first ?? "zh-Hans") : settings.langSetting
-        if activeLang.contains("en") {
-            settings.summaryPromptEN = "You are a professional meeting assistant. Please organize the following meeting transcript into a structured summary, including:\n1. Overview\n2. Key Topics\n3. Decisions Made\n4. Action Items"
-        } else {
-            settings.summaryPromptZH = "你是一个专业的会议纪要整理助手。请将以下会议发言记录整理成结构化的会议纪要，包括：\n1. 会议概要\n2. 主要议题\n3. 决策事项\n4. 待办事项"
         }
     }
 }

@@ -42,7 +42,7 @@ struct DebugLogView: View {
     }
 
     private func loadLog() {
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: "/tmp/mttone_diag.log")),
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: "/tmp/auranote_diag.log")),
            let text = String(data: data, encoding: .utf8) {
             log = text
         }

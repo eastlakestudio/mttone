@@ -20,7 +20,7 @@ actor WhisperService {
         defer { isLoading = false }
         
         let log = { (msg: String) in try? "[Whisper] \(msg)\n".data(using: .utf8).flatMap {
-            let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log"); h?.seekToEndOfFile(); h?.write($0); h?.closeFile()
+            let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log"); h?.seekToEndOfFile(); h?.write($0); h?.closeFile()
         } }
         
         let settings = SettingsManager.shared
@@ -81,9 +81,9 @@ actor WhisperService {
         let log = { (msg: String) in
             let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
             let line = "\(df.string(from: Date())) [Whisper] \(msg)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
-            } else { try? line.write(toFile: "/tmp/mttone_diag.log", atomically: true, encoding: .utf8) }
+            } else { try? line.write(toFile: "/tmp/auranote_diag.log", atomically: true, encoding: .utf8) }
         }
         log("开始转写: \(audioURL.lastPathComponent), 模型=large-v3, lang=\(language), temp=0.0")
 

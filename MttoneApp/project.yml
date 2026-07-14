@@ -1,4 +1,4 @@
-name: Mttone
+name: AuraNote
 options:
   bundleIdPrefix: com.eastlakestudio
   deploymentTarget:
@@ -19,11 +19,11 @@ settings:
   base:
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "J4RT98GF7B"
     SWIFT_VERSION: "5.9"
 
 targets:
-  Mttone:
+  AuraNote:
     type: application
     supportedDestinations: [iOS, macOS]
     sources:
@@ -34,14 +34,15 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Mttone/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.mttone
+        PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.auranote
+        PRODUCT_NAME: AuraNote
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "YES"
     info:
       path: Mttone/Info.plist
       properties:
-        CFBundleName: Mttone
-        CFBundleDisplayName: Mttone
+        CFBundleName: AuraNote
+        CFBundleDisplayName: 听纪
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen:
@@ -55,34 +56,39 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        NSMicrophoneUsageDescription: "Mttone 需要访问麦克风以录制会议音频"
-        NSSpeechRecognitionUsageDescription: "Mttone 需要语音识别权限以进行实时语音转写"
+        NSMicrophoneUsageDescription: "听纪需要访问麦克风以录制会议音频"
+        NSSpeechRecognitionUsageDescription: "听纪需要语音识别权限以进行实时语音转写"
+        LSApplicationCategoryType: "public.app-category.productivity"
     entitlements:
       path: Mttone/Mttone.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.device.audio-input: true
         com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.downloads.read-write: true
 
-  MttoneTests:
+  AuraNoteTests:
     type: bundle.unit-test
     supportedDestinations: [iOS, macOS]
     sources:
       - MttoneTests
     dependencies:
-      - target: Mttone
+      - target: AuraNote
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.mttone.tests
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Mttone.app/Contents/MacOS/Mttone
+        PRODUCT_BUNDLE_IDENTIFIER: com.eastlakestudio.auranote.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/AuraNote.app/Contents/MacOS/AuraNote
         BUNDLE_LOADER: $(TEST_HOST)
 
 schemes:
-  Mttone:
+  AuraNote:
     build:
       targets:
-        Mttone: [run, test, profile, analyze]
-        MttoneTests: [test]
+        AuraNote: [run, test, profile, analyze, archive]
+        AuraNoteTests: [test]
+    archive:
+      config: Release
     test:
       targets:
-        - MttoneTests
+        - AuraNoteTests

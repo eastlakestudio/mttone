@@ -214,10 +214,40 @@ struct PersonnelManagementView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding()
             } else {
-                HStack {
-                    Text("发言记录").font(.headline)
-                    Spacer()
-                    Text("请从左侧选择人员").font(.caption).foregroundStyle(.secondary)
+                // 未选人时显示统计信息
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("人员总览").font(.headline)
+                        Spacer()
+                    }
+                    
+                    let total = contacts.count
+                    let companies = companyStats
+                    
+                    VStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            Text("总计").font(.title2).foregroundStyle(.secondary)
+                            Text("\(total)").font(.largeTitle).fontWeight(.bold).foregroundStyle(.purple)
+                            Text("人").font(.title2).foregroundStyle(.secondary)
+                        }
+                        
+                        if !companies.isEmpty {
+                            Divider()
+                            VStack(spacing: 8) {
+                                ForEach(companies.sorted(by: { $0.value > $1.value }).prefix(8), id: \.key) { company, count in
+                                    HStack {
+                                        Image(systemName: "building.2.fill").font(.callout).foregroundStyle(.blue)
+                                        Text(company).font(.callout).lineLimit(1).frame(width: 120, alignment: .leading)
+                                        Spacer()
+                                        Text("\(count)人").font(.title3).fontWeight(.medium).foregroundStyle(.blue)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(.quaternary.opacity(0.3))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }.padding()
             }
 
@@ -278,6 +308,20 @@ struct PersonnelManagementView: View {
                 }
             }
         }
+    }
+
+    private var companyStats: [String: Int] {
+        var stats: [String: Int] = [:]
+        var noCompany = 0
+        for c in contacts {
+            if let company = c.company, !company.isEmpty {
+                stats[company, default: 0] += 1
+            } else {
+                noCompany += 1
+            }
+        }
+        if noCompany > 0 { stats["未分组"] = noCompany }
+        return stats
     }
 
     private func personColor(_ name: String) -> Color {

@@ -15,7 +15,14 @@ final class DatabaseManager {
         let documentsURL = FileManager.default.urls(
             for: .documentDirectory, in: .userDomainMask
         ).first!
-        dbPath = documentsURL.appendingPathComponent("mttone.db").path
+        let oldPath = documentsURL.appendingPathComponent("mttone.db").path
+        dbPath = documentsURL.appendingPathComponent("auranote.db").path
+        
+        // 从旧数据库迁移
+        if !FileManager.default.fileExists(atPath: dbPath), FileManager.default.fileExists(atPath: oldPath) {
+            try? FileManager.default.moveItem(atPath: oldPath, toPath: dbPath)
+            print("[DB] Migrated from mttone.db to auranote.db")
+        }
         openDatabase()
         createTables()
     }
@@ -763,7 +770,7 @@ final class DatabaseManager {
         let names = results.map { $0.name }.joined(separator: ", ")
         let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
         let line = "\(df.string(from: Date())) [DB] fetchContactsWithEmbeddings: \(results.count)人 (\(names.isEmpty ? "无" : names))\n"
-        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
             h.seekToEndOfFile(); h.write(d); h.closeFile()
         }
         return results

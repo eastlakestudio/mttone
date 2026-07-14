@@ -199,9 +199,9 @@ final class RecordingViewModel {
         let log = { (msg: String) in
             let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
             let line = "\(df.string(from: Date())) [VM] \(msg)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
-            } else { try? line.write(toFile: "/tmp/mttone_diag.log", atomically: true, encoding: .utf8) }
+            } else { try? line.write(toFile: "/tmp/auranote_diag.log", atomically: true, encoding: .utf8) }
         }
 
         transcriptionTask?.cancel()
@@ -506,7 +506,7 @@ final class RecordingViewModel {
         }
         guard !embeddings.isEmpty else {
             let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding SKIP: no embeddings for \(speakerLabel)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
             }
             return
@@ -514,13 +514,13 @@ final class RecordingViewModel {
         if let emb = embeddings[speakerLabel] {
             try? databaseManager.saveContactEmbedding(contactId: contactId, embedding: emb)
             let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding OK: \(speakerLabel) → \(emb.count)维\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
             }
         } else if let (key, emb) = embeddings.first {
             try? databaseManager.saveContactEmbedding(contactId: contactId, embedding: emb)
             let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding via \(key): \(emb.count)维\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
             }
         }
@@ -708,7 +708,7 @@ final class RecordingViewModel {
         let log = { (msg: String) in
             let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
             let line = "\(df.string(from: Date())) [Rename] \(msg)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
             }
         }
@@ -776,7 +776,7 @@ final class RecordingViewModel {
             let actualDuration = Int(audioPlayer.duration)
             let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
             let line = "\(df.string(from: Date())) [Duration] finishReview: meetingId=\(meeting.id), DB旧时长=\(meeting.duration)s, audioPlayer时长=\(actualDuration)s\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
                 h.seekToEndOfFile(); h.write(d); h.closeFile()
             }
             if actualDuration > 0 && actualDuration != meeting.duration {
@@ -839,7 +839,7 @@ final class RecordingViewModel {
         let logMsg = "对齐开始: Whisper时段[\(String(format:"%.0f",wMin))-\(String(format:"%.0f",wMax))s,\(transcripts.count)段] vs Diar时段[\(String(format:"%.0f",dMin))-\(String(format:"%.0f",dMax))s,\(diarization.count)段, speakers=\(dSpeakers)]"
         let dfh = DateFormatter(); dfh.dateFormat = "HH:mm:ss.SSS"
         let line = "\(dfh.string(from: Date())) [Align] \(logMsg)\n"
-        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/mttone_diag.log") {
+        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
             h.seekToEndOfFile(); h.write(d); h.closeFile()
         }
         var results = transcripts

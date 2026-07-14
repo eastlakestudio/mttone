@@ -10,9 +10,10 @@ struct MttoneApp: App {
                 .frame(minWidth: 960, minHeight: 760)
                 .environment(databaseManager)
                 .task {
-                    // 软件启动时后台预加载大模型，实现秒开录音
                     try? await WhisperService.shared.initialize()
                 }
         }
+        .defaultSize(width: 1440, height: 900)
+        .windowResizability(.contentMinSize)
     }
 }
