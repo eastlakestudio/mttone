@@ -35,8 +35,10 @@ actor DiarizationService {
     }
 
     func diarizeWithEmbeddings(audioURL: URL) async throws -> DiarizationOutput {
+        AppLog.info("声纹分离引擎启动: audio=\(audioURL.lastPathComponent)")
         let manager = try await getManager()
         let samples = try AudioConverter().resampleAudioFile(path: audioURL.path)
+        AppLog.info("音频重采样完成: \(samples.count) 样本")
         let result = try await manager.process(audio: samples)
         
         let segments = result.segments.map { segment in
@@ -55,15 +57,6 @@ actor DiarizationService {
         }
         
         let uniqueSpeakers = Set(segments.map(\.speakerId)).sorted()
-        let embCount = remappedDB.count
-        let embKeys = remappedDB.keys.sorted().joined(separator: ", ")
-        let msg = "声纹聚类完毕: \(segments.count)区间/\(uniqueSpeakers.count)人(\(uniqueSpeakers.joined(separator:","))), 向量:\(embCount)个(\(embKeys))"
-        
-        let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-        let line = "\(df.string(from: Date())) [Diar] \(msg)\n"
-        if let d = line.data(using: String.Encoding.utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-            h.seekToEndOfFile(); h.write(d); h.closeFile()
-        } else { try? line.write(toFile: "/tmp/auranote_diag.log", atomically: true, encoding: String.Encoding.utf8) }
         
         return DiarizationOutput(segments: segments, speakerEmbeddings: remappedDB)
     }

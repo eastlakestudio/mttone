@@ -81,9 +81,9 @@ extension Meeting {
         let files = (try? FileManager.default.contentsOfDirectory(atPath: docDir.path)) ?? []
         let matching = files.filter { $0.hasPrefix(expectedName) || $0.contains(id) }
         if matching.isEmpty {
-            return "录音文件未找到（\(expectedName).* 不存在于 Documents 目录）"
+            return String(format: loc("audio_file_not_found_diag"), expectedName)
         }
-        return "录音文件 \(url.lastPathComponent) 不存在，但发现相关文件: \(matching.joined(separator: ", "))"
+        return String(format: loc("audio_file_missing_diag"), url.lastPathComponent, matching.joined(separator: ", "))
     }
 }
 

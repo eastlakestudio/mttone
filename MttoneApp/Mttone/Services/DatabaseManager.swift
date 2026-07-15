@@ -21,7 +21,6 @@ final class DatabaseManager {
         // 从旧数据库迁移
         if !FileManager.default.fileExists(atPath: dbPath), FileManager.default.fileExists(atPath: oldPath) {
             try? FileManager.default.moveItem(atPath: oldPath, toPath: dbPath)
-            print("[DB] Migrated from mttone.db to auranote.db")
         }
         openDatabase()
         createTables()
@@ -38,9 +37,8 @@ final class DatabaseManager {
     private func openDatabase() {
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             let errmsg = String(cString: sqlite3_errmsg(db)!)
-            print("[DB] ERROR: Failed to open database: \(errmsg)")
+            // Failed to open database: errmsg
         } else {
-            print("[DB] Database opened at: \(dbPath)")
             // 开启外键约束
             sqlite3_exec(db, "PRAGMA foreign_keys = ON;", nil, nil, nil)
         }
@@ -108,9 +106,8 @@ final class DatabaseManager {
 
         if sqlite3_exec(db, schema, nil, nil, nil) != SQLITE_OK {
             let errmsg = String(cString: sqlite3_errmsg(db)!)
-            print("[DB] ERROR: Failed to create tables: \(errmsg)")
+            // Failed to create tables: errmsg
         } else {
-            print("[DB] Tables created successfully")
             
             // 增量在数据库中检查并补全 attendees 字段
             let checkColumnSql = "PRAGMA table_info(meetings);"
@@ -127,7 +124,6 @@ final class DatabaseManager {
             }
             if !hasAttendees {
                 sqlite3_exec(db, "ALTER TABLE meetings ADD COLUMN attendees TEXT;", nil, nil, nil)
-                print("[DB] Added attendees column to meetings table successfully.")
             }
 
             // 增量检查 contacts 表的 role / company 字段
@@ -145,11 +141,9 @@ final class DatabaseManager {
             }
             if !hasRole {
                 sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN role TEXT;", nil, nil, nil)
-                print("[DB] Added role column to contacts table.")
             }
             if !hasCompany {
                 sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN company TEXT;", nil, nil, nil)
-                print("[DB] Added company column to contacts table.")
             }
 
             // 增量检查 contacts 表的 voice_embedding 字段（BLOB）
@@ -162,7 +156,6 @@ final class DatabaseManager {
             }
             if !hasEmbed {
                 sqlite3_exec(db, "ALTER TABLE contacts ADD COLUMN voice_embedding BLOB;", nil, nil, nil)
-                print("[DB] Added voice_embedding column to contacts table.")
             }
 
             // 增量检查 meetings 表的 embedding_blob 字段
@@ -177,7 +170,6 @@ final class DatabaseManager {
             }
             if !hasMeetingEmbed {
                 sqlite3_exec(db, "ALTER TABLE meetings ADD COLUMN embedding_blob BLOB;", nil, nil, nil)
-                print("[DB] Added embedding_blob column to meetings table.")
             }
         }
     }
@@ -207,7 +199,6 @@ final class DatabaseManager {
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DBError.executeFailed(lastError)
         }
-        print("[DB] Meeting created: \(meeting.id) - \(meeting.title)")
     }
 
     func fixZombieMeetings() {
@@ -216,10 +207,7 @@ final class DatabaseManager {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
         if sqlite3_step(stmt) == SQLITE_DONE {
-            let count = sqlite3_changes(db)
-            if count > 0 {
-                print("[DB] Fixed \(count) zombie meeting(s) stuck in 'recording' status")
-            }
+            // Fixed zombie meetings
         }
     }
 
@@ -228,7 +216,6 @@ final class DatabaseManager {
         let sql = "SELECT id FROM meetings ORDER BY created_at DESC LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            print("[DB] ERROR preparing last meeting fetch: \(lastError)")
             return nil
         }
         defer { sqlite3_finalize(stmt) }
@@ -239,11 +226,20 @@ final class DatabaseManager {
         return nil
     }
 
-    func fetchDistinctLocations() -> [String] {
-        let sql = "SELECT DISTINCT location FROM meetings WHERE location IS NOT NULL AND location != '' AND location != '外部导入' ORDER BY created_at DESC LIMIT 20"
+    func fetchDistinctLocations(excludeExternal: String? = nil) -> [String] {
+        var sql = "SELECT DISTINCT location FROM meetings WHERE location IS NOT NULL AND location != ''"
+        let needsExclude = (excludeExternal?.isEmpty == false)
+        if needsExclude {
+            sql += " AND location != ?"
+        }
+        sql += " ORDER BY created_at DESC LIMIT 20"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
+
+        if needsExclude {
+            sqlite3_bind_text(stmt, 1, excludeExternal!.cString, -1, SQLITE_TRANSIENT)
+        }
 
         var locations: [String] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -272,7 +268,6 @@ final class DatabaseManager {
         let sql = "SELECT id, parent_meeting_id, title, location, audio_path, duration, status, summary, created_at, updated_at, attendees FROM meetings ORDER BY created_at DESC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            print("[DB] ERROR fetching meetings: \(lastError)")
             return []
         }
         defer { sqlite3_finalize(stmt) }
@@ -347,7 +342,6 @@ final class DatabaseManager {
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw DBError.executeFailed(lastError)
         }
-        print("[DB] Meeting \(id) info updated.")
     }
 
     func updateMeetingStatus(id: String, status: Meeting.Status, duration: Int? = nil) throws {
@@ -521,7 +515,6 @@ final class DatabaseManager {
         let sql = "SELECT id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at FROM speech_clips WHERE meeting_id = ? ORDER BY start_time ASC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            print("[DB] ERROR fetching speech clips: \(lastError)")
             return []
         }
         defer { sqlite3_finalize(stmt) }
@@ -587,7 +580,6 @@ final class DatabaseManager {
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, clipsSQL, -1, &stmt, nil) == SQLITE_OK else {
-            print("[DB] ERROR: \(lastError)")
             return []
         }
         defer { sqlite3_finalize(stmt) }
@@ -630,7 +622,6 @@ final class DatabaseManager {
         let sql = "SELECT id, meeting_id, speaker_label, contact_id, start_time, end_time, original_text, cleaned_text, audio_clip_path, is_key_clip, created_at FROM speech_clips WHERE contact_id = ? ORDER BY start_time ASC"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            print("[DB] ERROR fetching speech clips for contact: \(lastError)")
             return []
         }
         defer { sqlite3_finalize(stmt) }
@@ -766,12 +757,6 @@ final class DatabaseManager {
                     results.append((id: id, name: name, embedding: embedding))
                 }
             }
-        }
-        let names = results.map { $0.name }.joined(separator: ", ")
-        let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-        let line = "\(df.string(from: Date())) [DB] fetchContactsWithEmbeddings: \(results.count)人 (\(names.isEmpty ? "无" : names))\n"
-        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-            h.seekToEndOfFile(); h.write(d); h.closeFile()
         }
         return results
     }

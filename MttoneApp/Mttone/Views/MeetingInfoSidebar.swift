@@ -9,7 +9,6 @@ struct MeetingInfoSidebar: View {
     @State private var editedLocation = ""
     @State private var editedCreatedAt = Date()
     @State private var editedEndedAt = Date()
-    @State private var newAttendeeName = ""
     @State private var showDatePickerPopover = false
     @State private var showEndDatePickerPopover = false
     @Binding var filterSpeaker: String?
@@ -44,7 +43,7 @@ struct MeetingInfoSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("会议属性").font(.headline).padding(.bottom, 4)
+            Text(loc("meeting_properties")).font(.headline).padding(.bottom, 4)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     titleField
@@ -64,11 +63,11 @@ struct MeetingInfoSidebar: View {
         .onChange(of: viewModel.currentMeeting) { _, _ in loadMetadata() }
         .popover(isPresented: $showRenameAttendeePopover) {
             VStack(spacing: 8) {
-                Text("重命名参会人").font(.caption).foregroundStyle(.secondary)
-                TextField("新名称", text: $renamePerson).textFieldStyle(.roundedBorder)
+                Text(loc("rename_attendee")).font(.caption).foregroundStyle(.secondary)
+                TextField(loc("new_name"), text: $renamePerson).textFieldStyle(.roundedBorder)
                 HStack {
-                    Spacer(); Button("取消") { showRenameAttendeePopover = false }
-                    Button("确定") {
+                    Spacer(); Button(loc("cancel")) { showRenameAttendeePopover = false }
+                    Button(loc("confirm")) {
                         let newName = renamePerson.trimmingCharacters(in: .whitespaces)
                         if !newName.isEmpty && newName != renameTarget {
                             viewModel.globalRenameSpeaker(oldName: renameTarget, newName: newName)
@@ -87,14 +86,14 @@ struct MeetingInfoSidebar: View {
 
     private var titleField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("会议主题").font(.caption).foregroundStyle(.secondary)
-            TextField("输入会议主题", text: $editedTitle).textFieldStyle(.roundedBorder).onSubmit { saveMetadata() }
+            Text(loc("topic")).font(.caption).foregroundStyle(.secondary)
+            TextField(loc("enter_topic"), text: $editedTitle).textFieldStyle(.roundedBorder).onSubmit { saveMetadata() }
         }
     }
 
     private var startTimeField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("开始时间").font(.caption).foregroundStyle(.secondary)
+            Text(loc("start_time")).font(.caption).foregroundStyle(.secondary)
             Button { showDatePickerPopover = true } label: {
                 HStack {
                     Image(systemName: "calendar").foregroundStyle(.purple)
@@ -111,7 +110,7 @@ struct MeetingInfoSidebar: View {
 
     private var endTimeField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("结束时间").font(.caption).foregroundStyle(.secondary)
+            Text(loc("end_time")).font(.caption).foregroundStyle(.secondary)
             Button { showEndDatePickerPopover = true } label: {
                 HStack {
                     Image(systemName: "calendar").foregroundStyle(.purple)
@@ -128,14 +127,14 @@ struct MeetingInfoSidebar: View {
 
     private var locationField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("地点").font(.caption).foregroundStyle(.secondary)
-            TextField("会议地点", text: $editedLocation).textFieldStyle(.roundedBorder).onSubmit { saveMetadata() }
+            Text(loc("location_label")).font(.caption).foregroundStyle(.secondary)
+            TextField(loc("meeting_place"), text: $editedLocation).textFieldStyle(.roundedBorder).onSubmit { saveMetadata() }
         }
     }
 
     private var attendeeField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("参会人").font(.caption).foregroundStyle(.secondary)
+            Text(loc("attendees")).font(.caption).foregroundStyle(.secondary)
             let list = editedAttendeesList
             if !list.isEmpty {
                 FlowLayout(spacing: 6) {
@@ -154,7 +153,7 @@ struct MeetingInfoSidebar: View {
 
             // 搜索输入 → 筛选结果
             HStack {
-                TextField("搜索人员...", text: $attendeeSearchText)
+                TextField(loc("search_person"), text: $attendeeSearchText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit {
                         let trimmed = attendeeSearchText.trimmingCharacters(in: .whitespaces)
@@ -165,14 +164,13 @@ struct MeetingInfoSidebar: View {
                             }
                         }
                     }
-                    .onChange(of: attendeeSearchText) { _, _ in }
                 Button { showNewContactSheet = true } label: {
                     Image(systemName: "person.badge.plus").foregroundStyle(.purple)
-                }.buttonStyle(.plain).help("新建人员")
+                }.buttonStyle(.plain).help(loc("new_personnel"))
 
                 Button { showMultiSelectPopover = true } label: {
                     Image(systemName: "list.bullet.rectangle").foregroundStyle(.purple)
-                }.buttonStyle(.plain).help("从全局人员库多选")
+                }.buttonStyle(.plain).help(loc("select_from_db"))
                 .popover(isPresented: $showMultiSelectPopover) {
                     MultiSelectContactPicker(
                         selectedNames: Set(editedAttendeesList),
@@ -242,69 +240,15 @@ struct MeetingInfoSidebar: View {
         saveMetadata(updatedAttendees: list.joined(separator: " "))
     }
 
-    // MARK: - 说话人匹配
-
-    private var speakerMatchingSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Divider().padding(.vertical, 4)
-            HStack {
-                Text("说话人匹配").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                NavigationLink(destination: PersonnelManagementView()) {
-                    HStack(spacing: 2) {
-                        Image(systemName: "person.3.sequence.fill"); Text("字典")
-                    }
-                    .font(.caption).padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(.purple.opacity(0.1)).foregroundStyle(.purple).clipShape(Capsule())
-                }.buttonStyle(.plain)
-            }
-            let unmatched = viewModel.uniqueSpeakers.filter { !editedAttendeesList.contains($0) }
-            if unmatched.isEmpty {
-                Text("暂无未匹配说话人").font(.subheadline).foregroundStyle(.tertiary)
-            } else {
-                ForEach(unmatched, id: \.self) { speaker in
-                    HStack {
-                        Image(systemName: "circle").font(.caption).foregroundStyle(.tertiary)
-                        Text(speaker).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                        Spacer()
-                        Menu {
-                            Section("绑定到参会人") {
-                                ForEach(editedAttendeesList, id: \.self) { person in
-                                    Button(person) {
-                                        viewModel.globalRenameSpeaker(oldName: speaker, newName: person)
-                                    }
-                                }
-                            }
-                            if editedAttendeesList.isEmpty {
-                                Text("暂无参会人").font(.caption).foregroundStyle(.tertiary)
-                            }
-                        } label: {
-                            Text("绑定").font(.caption).foregroundStyle(.purple)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Color.purple.opacity(0.1)).clipShape(Capsule())
-                        }
-                        .menuStyle(.borderlessButton).buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 6).padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(filterSpeaker == speaker ? Color.purple.opacity(0.12) : Color.clear)
-                    )
-                }
-            }
-        }
-    }
-
     // MARK: - 发言统计
 
     private var speakerStatsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Divider().padding(.vertical, 4)
-            Text("发言统计").font(.caption).foregroundStyle(.secondary)
+            Text(loc("speech_stats")).font(.caption).foregroundStyle(.secondary)
             let stats = speakerStats
             if stats.isEmpty {
-                Text("暂无数据").font(.subheadline).foregroundStyle(.tertiary)
+                Text(loc("no_data")).font(.subheadline).foregroundStyle(.tertiary)
             } else {
                 ForEach(stats, id: \.speaker) { item in
                     HStack {
@@ -317,7 +261,7 @@ struct MeetingInfoSidebar: View {
                                     .fontWeight(filterSpeaker == item.speaker ? .bold : .regular)
                                     .foregroundStyle(filterSpeaker == item.speaker ? .purple : .primary)
                                 Spacer()
-                                Text("\(item.count)句 | \(String(format: "%.1f", item.duration))s")
+                                Text("\(String(format: loc("sentences_count_fmt"), item.count)) | \(String(format: "%.1f", item.duration))s")
                                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, 6).padding(.vertical, 4)
@@ -330,7 +274,7 @@ struct MeetingInfoSidebar: View {
 
                         Menu {
                             if !editedAttendeesList.isEmpty {
-                                Section("重新分配到参会人") {
+                                Section(loc("reassign")) {
                                     ForEach(editedAttendeesList.filter { $0 != item.speaker }, id: \.self) { person in
                                         Button(person) {
                                             viewModel.globalRenameSpeaker(oldName: item.speaker, newName: person)
@@ -338,12 +282,12 @@ struct MeetingInfoSidebar: View {
                                     }
                                 }
                             }
-                            Button("重命名") {
+                            Button(loc("rename")) {
                                 renameTarget = item.speaker; renamePerson = item.speaker
                                 showRenameAttendeePopover = true
                             }
                             if editedAttendeesList.contains(item.speaker) {
-                                Button("从参会人中移除", role: .destructive) {
+                                Button(loc("remove_from_attendees"), role: .destructive) {
                                     removeAttendee(item.speaker)
                                 }
                             }
@@ -371,8 +315,8 @@ struct MeetingInfoSidebar: View {
     private func saveMetadata(updatedAttendees: String? = nil) {
         let title = editedTitle.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else { return }
-        let loc = editedLocation.trimmingCharacters(in: .whitespaces)
-        let location = loc.isEmpty ? nil : loc
+        let locationText = editedLocation.trimmingCharacters(in: .whitespaces)
+        let location = locationText.isEmpty ? nil : locationText
         let attendeesStr = updatedAttendees ?? attendeesString
         // 新增参会人时同步创建全局联系人
         if let updated = updatedAttendees {
@@ -388,14 +332,6 @@ struct MeetingInfoSidebar: View {
             title: title, location: location, createdAt: editedCreatedAt,
             attendees: attendeesStr, duration: duration
         )
-    }
-
-    private func addAttendee() {
-        let name = newAttendeeName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        var list = editedAttendeesList
-        if !list.contains(name) { list.append(name); saveMetadata(updatedAttendees: list.joined(separator: " ")) }
-        newAttendeeName = ""
     }
 
     private func removeAttendee(_ name: String) {
@@ -418,26 +354,26 @@ struct NewContactSheet: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text("新建人员").font(.headline)
+            Text(loc("new_personnel")).font(.headline)
             Divider()
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("人名").font(.caption).foregroundStyle(.secondary)
-                    TextField("姓名（必填）", text: $name).textFieldStyle(.roundedBorder)
+                    Text(loc("person_name")).font(.caption).foregroundStyle(.secondary)
+                    TextField(loc("name_required"), text: $name).textFieldStyle(.roundedBorder)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("角色").font(.caption).foregroundStyle(.secondary)
-                    TextField("如：项目经理、开发工程师", text: $role).textFieldStyle(.roundedBorder)
+                    Text(loc("role")).font(.caption).foregroundStyle(.secondary)
+                    TextField(loc("role_hint"), text: $role).textFieldStyle(.roundedBorder)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("组织").font(.caption).foregroundStyle(.secondary)
-                    TextField("如：阿里巴巴、腾讯", text: $company).textFieldStyle(.roundedBorder)
+                    Text(loc("org")).font(.caption).foregroundStyle(.secondary)
+                    TextField(loc("org_hint"), text: $company).textFieldStyle(.roundedBorder)
                 }
             }
             HStack(spacing: 12) {
-                Button("取消") { onCancel() }.controlSize(.large)
+                Button(loc("cancel")) { onCancel() }.controlSize(.large)
                 Spacer()
-                Button("创建") {
+                Button(loc("create")) {
                     let n = name.trimmingCharacters(in: .whitespaces)
                     guard !n.isEmpty else { return }
                     let contact = Contact(
@@ -483,18 +419,18 @@ struct MultiSelectContactPicker: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("选择参会人").font(.headline)
+                Text(loc("select_attendees")).font(.headline)
                 Spacer()
             }.padding()
 
-            TextField("搜索...", text: $searchText)
+            TextField(loc("search"), text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal)
 
             Divider().padding(.vertical, 4)
 
             if filteredContacts.isEmpty {
-                Text("无匹配人员").font(.subheadline).foregroundStyle(.secondary).padding()
+                Text(loc("no_match")).font(.subheadline).foregroundStyle(.secondary).padding()
             } else {
                 List(filteredContacts, id: \.id) { contact in
                     Button {
@@ -528,12 +464,12 @@ struct MultiSelectContactPicker: View {
 
             HStack(spacing: 12) {
                 Button { showNewContactInPicker = true } label: {
-                    Label("新建", systemImage: "person.badge.plus").font(.caption)
+                    Label(loc("new"), systemImage: "person.badge.plus").font(.caption)
                 }.buttonStyle(.borderless)
-                Text("已选 \(selectedNames.count) 人").font(.caption).foregroundStyle(.secondary)
+                Text(String(format: loc("selected_count"), selectedNames.count)).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("取消") { onConfirm([]) }.buttonStyle(.borderless)
-                Button("确认") { onConfirm(selectedNames) }
+                Button(loc("cancel")) { onConfirm([]) }.buttonStyle(.borderless)
+                Button(loc("confirm_btn")) { onConfirm(selectedNames) }
                     .buttonStyle(.borderedProminent).tint(.purple).controlSize(.small)
             }.padding()
         }

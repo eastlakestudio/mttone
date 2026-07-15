@@ -24,9 +24,6 @@ enum KeychainHelper {
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
-        if status != errSecSuccess {
-            print("[Keychain] save error for key '\(key)': \(status)")
-        }
         return status == errSecSuccess
     }
 

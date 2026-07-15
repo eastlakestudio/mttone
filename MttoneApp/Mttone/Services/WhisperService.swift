@@ -8,20 +8,14 @@ actor WhisperService {
     private(set) var isReady = false
     private(set) var isLoading = false
     
-    private var defaultModelPath: String {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml").path
-    }
+    private var defaultModelPath: String { SettingsManager.shared.defaultModelPath }
 
-    /// 初始化并预加载模型
+    /// 初始化并预加载模型（仅从本地磁盘加载，不访问网络）
+    /// 模型必须先通过「系统配置」页面下载，否则抛出错误引导用户下载
     func initialize() async throws {
         if isReady && pipe != nil { return }
         isLoading = true
         defer { isLoading = false }
-        
-        let log = { (msg: String) in try? "[Whisper] \(msg)\n".data(using: .utf8).flatMap {
-            let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log"); h?.seekToEndOfFile(); h?.write($0); h?.closeFile()
-        } }
         
         let settings = SettingsManager.shared
         var modelID = settings.selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
@@ -30,21 +24,33 @@ actor WhisperService {
         }
         let basePath = settings.modelPath
         if basePath.isEmpty {
-            log("错误: 模型缓存路径未设置，请在设置中选择路径并下载模型。")
-            throw NSError(domain: "WhisperService", code: 400, userInfo: [NSLocalizedDescriptionKey: "模型未下载，请前往系统设置选择路径并进行下载。"])
+            throw NSError(domain: "WhisperService", code: 400,
+                userInfo: [NSLocalizedDescriptionKey: loc("model_not_downloaded_settings")])
         }
-        let endpoint = settings.useChinaMirror ? "https://hf-mirror.com" : "https://huggingface.co"
         
-        log("开始加载/下载模型: \(modelID) (缓存路径: \(basePath), 源: \(endpoint))...")
+        // 计算模型本地文件夹（与 SettingsView 下载目录结构一致）
+        let primaryPath = "\(basePath)/models/argmaxinc/whisperkit-coreml/\(modelID)"
+        let altPath = "\(basePath)/\(modelID)"
         
-        let config = WhisperKitConfig(
-            model: modelID,
-            downloadBase: URL(fileURLWithPath: basePath),
-            modelEndpoint: endpoint
-        )
+        func hasModel(at path: String) -> Bool {
+            let folder = URL(fileURLWithPath: path)
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir), isDir.boolValue else { return false }
+            let marker = folder.appendingPathComponent(".download_complete")
+            return FileManager.default.fileExists(atPath: marker.path)
+        }
+        
+        let localPath: String? = hasModel(at: primaryPath) ? primaryPath : (hasModel(at: altPath) ? altPath : nil)
+        
+        guard let modelPath = localPath else {
+            throw NSError(domain: "WhisperService", code: 404,
+                userInfo: [NSLocalizedDescriptionKey: loc("model_not_downloaded_settings")])
+        }
+        
+        let config = WhisperKitConfig(modelFolder: modelPath)
         self.pipe = try await WhisperKit(config)
         self.isReady = true
-        log("模型加载完成!")
+        AppLog.info("模型加载成功: \(modelPath)")
     }
     
     /// 重置服务，以备重新载入新模型
@@ -58,8 +64,10 @@ actor WhisperService {
         // 强制确保模型已加载
         try await initialize()
         guard let pipe = pipe else {
-            throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型加载失败，请检查网络后重试"])
+            throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: loc("model_load_failed")])
         }
+
+        AppLog.info("离线转写开始: audio=\(audioURL.lastPathComponent) lang=\(language)")
 
         // 设置段发现回调：转写过程中持续输出中间结果
         if let onSegments = onSegments {
@@ -73,38 +81,6 @@ actor WhisperService {
                         speakerLabel: "Speaker_1",
                         isFinal: true
                     )
-                }
-                DispatchQueue.main.async { onSegments(mapped) }
-            }
-        }
-        
-        let log = { (msg: String) in
-            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-            let line = "\(df.string(from: Date())) [Whisper] \(msg)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            } else { try? line.write(toFile: "/tmp/auranote_diag.log", atomically: true, encoding: .utf8) }
-        }
-        log("开始转写: \(audioURL.lastPathComponent), 模型=large-v3, lang=\(language), temp=0.0")
-
-        // 设置段发现回调，并统计回调次数
-        var callbackCount = 0
-        if let onSegments = onSegments {
-            pipe.segmentDiscoveryCallback = { whisperSegments in
-                callbackCount += 1
-                let mapped = whisperSegments.map { seg in
-                    TranscriptSegment(
-                        id: "\(meetingId)_\(seg.id)",
-                        startTime: Double(seg.start),
-                        endTime: Double(seg.end),
-                        text: seg.text.toSimplifiedChinese(),
-                        speakerLabel: "Speaker_1",
-                        isFinal: true
-                    )
-                }
-                DispatchQueue.global().async {
-                    let sample = mapped.prefix(2).map { "[\(Int($0.startTime))s] \($0.text.prefix(30))" }.joined(separator: " | ")
-                    log("callback#\(callbackCount): \(mapped.count)段, 样例: \(sample)")
                 }
                 onSegments(mapped)
             }
@@ -127,10 +103,6 @@ actor WhisperService {
         let results = try await pipe.transcribe(audioPath: audioURL.path, decodeOptions: options)
 
         if let result = results.first {
-            log("转写完成: \(result.segments.count) 段, callback共触发\(callbackCount)次")
-            // 打印转写文本样例
-            let samples = result.segments.prefix(5).map { "[\(Int($0.start))s] \($0.text.prefix(40))" }.joined(separator: " | ")
-            log("文本样例: \(samples)")
             for (index, segment) in result.segments.enumerated() {
                 let text = segment.text
                 let trimmedText = text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
@@ -138,7 +110,7 @@ actor WhisperService {
                     continue
                 }
                 
-                // 过滤常见的 Whisper 幻觉文本（中文训练集中常出现的字幕组或静音噪音产物）
+                // 过滤常见的 Whisper 幻觉文本（模型行为过滤，非 UI 文本，无需国际化）
                 let lower = trimmedText.lowercased()
                 let hallucinations = ["字幕", "j chong", "amara.org", "感谢观看", "请不吝赐教", "不发音", "无声"]
                 if hallucinations.contains(where: { lower.contains($0) }) {
@@ -146,7 +118,7 @@ actor WhisperService {
                 }
                 
                 let parsedSegment = TranscriptSegment(
-                    id: "\(meetingId)_whisper_\(index)",
+                    id: "\(meetingId)_\(segment.id)",
                     startTime: Double(segment.start),
                     endTime: Double(segment.end),
                     text: segment.text.toSimplifiedChinese(),
@@ -157,7 +129,7 @@ actor WhisperService {
             }
         }
         
-        print("[WhisperService] 转写完成，共生成 \(parsedSegments.count) 段")
+        AppLog.info("离线转写完成: \(parsedSegments.count) 段")
         return parsedSegments
     }
     
@@ -165,7 +137,7 @@ actor WhisperService {
     /// 传入音频缓冲区数组，返回转写出的连续文本
     func transcribeLive(audioArray: [Float], language: String = "zh") async throws -> String {
         guard let pipe = pipe else {
-            throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: "模型尚未加载完成"])
+            throw NSError(domain: "WhisperService", code: 1, userInfo: [NSLocalizedDescriptionKey: loc("model_not_loaded")])
         }
         
         let options = DecodingOptions(
@@ -185,7 +157,7 @@ actor WhisperService {
         // 直接使用 result.text，避免 segments 可能为空的情况
         let fullText = result.text.trimmingCharacters(in: .whitespacesAndNewlines).toSimplifiedChinese()
         
-        // 过滤幻觉
+        // 过滤幻觉（模型行为过滤，非 UI 文本，无需国际化）
         let lower = fullText.lowercased()
         let hallucinations = ["字幕", "j chong", "amara.org", "感谢观看", "请不吝赐教", "不发音", "无声"]
         if hallucinations.contains(where: { lower.contains($0) }) {

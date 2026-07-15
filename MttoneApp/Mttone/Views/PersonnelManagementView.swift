@@ -50,9 +50,9 @@ struct PersonnelManagementView: View {
                 editContact = nil
             }, onCancel: { editContact = nil })
         }
-        .alert("确认删除", isPresented: $showDeleteConfirm) {
-            Button("取消", role: .cancel) { deleteTarget = nil }
-            Button("删除", role: .destructive) {
+        .alert(loc("confirm_delete_person"), isPresented: $showDeleteConfirm) {
+            Button(loc("cancel"), role: .cancel) { deleteTarget = nil }
+            Button(loc("delete"), role: .destructive) {
                 if let contact = deleteTarget {
                     try? db.deleteContact(id: contact.id)
                     contacts = db.fetchAllContacts()
@@ -62,7 +62,7 @@ struct PersonnelManagementView: View {
             }
         } message: {
             if let contact = deleteTarget {
-                Text("确定删除「\(contact.name)」吗？此操作不可撤销。\n该人员的声纹向量和发言记录关联将被清除。")
+                Text(String(format: loc("confirm_delete_person_msg"), contact.name))
             }
         }
     }
@@ -72,18 +72,18 @@ struct PersonnelManagementView: View {
     private var leftColumn: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("人员列表").font(.headline)
+                Text(loc("personnel_list")).font(.headline)
                 Spacer()
                 Button { showAddSheet = true } label: {
                     Image(systemName: "person.badge.plus").foregroundStyle(.purple)
-                }.buttonStyle(.plain).help("添加人员")
+                }.buttonStyle(.plain).help(loc("add_person"))
             }.padding()
 
             Divider()
 
             if contacts.isEmpty {
                 VStack(spacing: 8) {
-                    Text("暂无人员").font(.subheadline).foregroundStyle(.secondary)
+                    Text(loc("no_personnel")).font(.subheadline).foregroundStyle(.secondary)
                 }.frame(maxHeight: .infinity)
             } else {
                 List(contacts, id: \.id) { contact in
@@ -114,14 +114,14 @@ struct PersonnelManagementView: View {
                     .buttonStyle(.plain)
                     .contextMenu {
                         Button { editContact = contact } label: {
-                            Label("编辑", systemImage: "pencil")
+                            Label(loc("edit"), systemImage: "pencil")
                         }
                         Divider()
                         Button(role: .destructive) {
                             deleteTarget = contact
                             showDeleteConfirm = true
                         } label: {
-                            Label("删除", systemImage: "trash")
+                            Label(loc("delete"), systemImage: "trash")
                         }
                     }
                 }
@@ -140,12 +140,12 @@ struct PersonnelManagementView: View {
     private func attributePanel(_ contact: Contact) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("人员属性").font(.caption).foregroundStyle(.secondary)
+                Text(loc("person_attributes")).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 // 预留固定高度按钮区域，避免面板抖动
                 ZStack {
                     if isDirty {
-                        Button("保存") {
+                        Button(loc("save")) {
                             let updated = Contact(
                                 id: contact.id,
                                 name: editingAttrName.trimmingCharacters(in: .whitespaces),
@@ -171,21 +171,21 @@ struct PersonnelManagementView: View {
             }
             VStack(spacing: 6) {
                 HStack {
-                    Text("姓名").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                    Text(loc("name")).font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
                     TextField("", text: $editingAttrName)
                         .textFieldStyle(.roundedBorder)
                         .font(.subheadline)
                         .onChange(of: editingAttrName) { _, _ in setDirtyIfChanged(contact) }
                     }
                     HStack {
-                        Text("角色").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                        Text(loc("role")).font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
                         TextField("", text: $editingAttrRole)
                             .textFieldStyle(.roundedBorder)
                             .font(.subheadline)
                             .onChange(of: editingAttrRole) { _, _ in setDirtyIfChanged(contact) }
                     }
                     HStack {
-                        Text("组织").font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
+                        Text(loc("org")).font(.caption).foregroundStyle(.secondary).frame(width: 40, alignment: .leading)
                         TextField("", text: $editingAttrCompany)
                             .textFieldStyle(.roundedBorder)
                             .font(.subheadline)
@@ -210,14 +210,14 @@ struct PersonnelManagementView: View {
                         }
                     }
                     Spacer()
-                    Text("\(groupedClips.reduce(0) { $0 + $1.clips.count }) 条发言 · \(groupedClips.count) 场会议")
+                    Text(String(format: loc("speech_count_fmt"), groupedClips.reduce(0) { $0 + $1.clips.count }, groupedClips.count))
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding()
             } else {
                 // 未选人时显示统计信息
                 VStack(spacing: 16) {
                     HStack {
-                        Text("人员总览").font(.headline)
+                        Text(loc("personnel_overview")).font(.headline)
                         Spacer()
                     }
                     
@@ -226,9 +226,9 @@ struct PersonnelManagementView: View {
                     
                     VStack(spacing: 12) {
                         HStack(spacing: 4) {
-                            Text("总计").font(.title2).foregroundStyle(.secondary)
+                            Text(loc("total")).font(.title2).foregroundStyle(.secondary)
                             Text("\(total)").font(.largeTitle).fontWeight(.bold).foregroundStyle(.purple)
-                            Text("人").font(.title2).foregroundStyle(.secondary)
+                            Text(loc("people_unit")).font(.title2).foregroundStyle(.secondary)
                         }
                         
                         if !companies.isEmpty {
@@ -239,7 +239,7 @@ struct PersonnelManagementView: View {
                                         Image(systemName: "building.2.fill").font(.callout).foregroundStyle(.blue)
                                         Text(company).font(.callout).lineLimit(1).frame(width: 120, alignment: .leading)
                                         Spacer()
-                                        Text("\(count)人").font(.title3).fontWeight(.medium).foregroundStyle(.blue)
+                                        Text(String(format: loc("people_count_fmt"), count)).font(.title3).fontWeight(.medium).foregroundStyle(.blue)
                                     }
                                 }
                             }
@@ -256,7 +256,7 @@ struct PersonnelManagementView: View {
             if groupedClips.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "waveform").font(.largeTitle).foregroundStyle(.quaternary)
-                    Text("暂无发言记录").font(.subheadline).foregroundStyle(.secondary)
+                    Text(loc("no_speech_records")).font(.subheadline).foregroundStyle(.secondary)
                 }.frame(maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -320,7 +320,7 @@ struct PersonnelManagementView: View {
                 noCompany += 1
             }
         }
-        if noCompany > 0 { stats["未分组"] = noCompany }
+        if noCompany > 0 { stats[loc("no_company")] = noCompany }
         return stats
     }
 
@@ -375,13 +375,13 @@ struct ContactEditView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            Text(existing != nil ? "编辑人员" : "添加人员").font(.headline)
-            TextField("姓名", text: $name).textFieldStyle(.roundedBorder)
-            TextField("角色（可选）", text: $role).textFieldStyle(.roundedBorder)
-            TextField("公司（可选）", text: $company).textFieldStyle(.roundedBorder)
+            Text(existing != nil ? loc("edit") : loc("add_person")).font(.headline)
+            TextField(loc("name"), text: $name).textFieldStyle(.roundedBorder)
+            TextField(loc("role_hint"), text: $role).textFieldStyle(.roundedBorder)
+            TextField(loc("org_hint"), text: $company).textFieldStyle(.roundedBorder)
             HStack(spacing: 12) {
-                Button("取消") { onCancel() }.controlSize(.large); Spacer()
-                Button("保存") {
+                Button(loc("cancel")) { onCancel() }.controlSize(.large); Spacer()
+                Button(loc("save")) {
                     let n = name.trimmingCharacters(in: .whitespaces)
                     guard !n.isEmpty else { return }
                     onSave(Contact(id: existing?.id ?? UUID().uuidString, name: n,

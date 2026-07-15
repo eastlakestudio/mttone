@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct DebugLogView: View {
     @State private var log: String = ""
@@ -8,10 +9,22 @@ struct DebugLogView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("调试日志").font(.headline)
+                Text(loc("debug_log")).font(.headline)
                 Spacer()
-                Button("刷新") { loadLog() }
+                Button(loc("refresh")) { loadLog() }
                     .buttonStyle(.bordered).controlSize(.small)
+                Button { copyLog() } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .help(loc("copy"))
+                .disabled(log.isEmpty)
+                Button { clearLog() } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .help(loc("delete"))
+                .disabled(log.isEmpty)
                 Button { dismiss() } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }.buttonStyle(.plain)
@@ -22,7 +35,7 @@ struct DebugLogView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(log.isEmpty ? "暂无日志" : log)
+                    Text(log.isEmpty ? loc("debug_log_empty") : log)
                         .font(.system(.caption, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
@@ -42,9 +55,28 @@ struct DebugLogView: View {
     }
 
     private func loadLog() {
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: "/tmp/auranote_diag.log")),
+        let logURL = Self.logFileURL
+        if let data = try? Data(contentsOf: logURL),
            let text = String(data: data, encoding: .utf8) {
             log = text
+        } else {
+            log = ""
         }
+    }
+
+    private func copyLog() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(log, forType: .string)
+    }
+
+    private func clearLog() {
+        try? Data().write(to: Self.logFileURL)
+        log = ""
+    }
+
+    private static var logFileURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("debug.log")
     }
 }

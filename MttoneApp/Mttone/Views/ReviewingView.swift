@@ -15,6 +15,123 @@ struct ReviewingView: View {
     @State private var showRetryConfirm = false
     @State private var pendingRetryAction: (() -> Void)?
 
+    private var diarizationProgress: (separated: Int, total: Int)? {
+        guard let meeting = viewModel.currentMeeting, meeting.duration > 0 else { return nil }
+        let finals = viewModel.transcriptSegments.filter { $0.isFinal }
+        let separated = finals.filter { !$0.speakerLabel.isEmpty }.count
+        let estimatedTotal = max(1, Int(Double(meeting.duration) / 3.0))
+        let total = max(estimatedTotal, finals.count)
+        return (separated, total)
+    }
+    
+    private var retryButtonLabel: String {
+        if viewModel.isTranscribingOffline { return loc("analyzing") }
+        if viewModel.transcriptSegments.isEmpty { return loc("reanalyze") }
+        return loc("continue_analysis")
+    }
+    
+    private var retryButtonIcon: String {
+        viewModel.isTranscribingOffline ? "hourglass" : "waveform.badge.magnifyingglass"
+    }
+    
+    private var diarizationProgressText: String? {
+        guard let dp = diarizationProgress else { return nil }
+        return "\(dp.separated) / \(dp.total) 段"
+    }
+    
+    private var diarizationProgressDone: Bool {
+        guard let dp = diarizationProgress else { return false }
+        return dp.separated >= dp.total
+    }
+    
+    private var transcriptionPercent: Int? {
+        guard viewModel.segmentCount > 0, let meeting = viewModel.currentMeeting else { return nil }
+        let estimatedTotal = max(1.0, Double(meeting.duration) / 3.0)
+        let raw = Double(viewModel.segmentCount) / max(1.0, estimatedTotal) * 100
+        return min(99, max(1, Int(raw)))
+    }
+    
+    @ViewBuilder
+    private var reviewToolbar: some View {
+        VStack(spacing: 10) {
+            // 第一行：继续分析（左对齐）+ 进度数字（右对齐）
+            HStack(spacing: 12) {
+                if let meeting = viewModel.currentMeeting, meeting.audioFileExists {
+                    HStack(spacing: 6) {
+                        Button {
+                            let hasSegments = !viewModel.transcriptSegments.isEmpty
+                            // 检测转写是否明显不完整（段数不足估算的 80%）
+                            let isIncomplete: Bool = {
+                                guard let m = viewModel.currentMeeting, m.duration > 0 else { return false }
+                                let finals = viewModel.transcriptSegments.filter { $0.isFinal }
+                                let estimated = max(1, Int(Double(m.duration) / 3.0))
+                                return finals.count < estimated * 8 / 10
+                            }()
+                            let url = meeting.localAudioURL
+                            if hasSegments && !isIncomplete {
+                                // 段数完整 → 仅做声纹分离
+                                viewModel.continueOfflineDiarization(for: meeting.id, audioURL: url)
+                            } else if hasSegments && isIncomplete {
+                                // 段数不完整 → 确认后重新完整转写
+                                pendingRetryAction = { [weak viewModel] in
+                                    viewModel?.retryOfflineTranscription(for: meeting.id, audioURL: url)
+                                }
+                                showRetryConfirm = true
+                            } else {
+                                // 无段 → 直接完整转写
+                                viewModel.retryOfflineTranscription(for: meeting.id, audioURL: url)
+                            }
+                        } label: {
+                            Label(retryButtonLabel, systemImage: retryButtonIcon)
+                                .font(.body)
+                                .fontWeight(.medium)
+                        }
+                        .disabled(viewModel.isTranscribingOffline)
+                        .buttonStyle(.bordered)
+                        .tint(.purple)
+                        .controlSize(.regular)
+                    }
+                }
+                Spacer()
+                if let text = diarizationProgressText {
+                    Text(text)
+                        .font(.caption)
+                        .foregroundStyle(diarizationProgressDone ? Color.secondary : Color.orange)
+                }
+            }
+            
+            // 第二行：导出（左）+ 拷贝（右）
+            HStack(spacing: 12) {
+                Button {
+                    exportMeetingRecord()
+                } label: {
+                    Label(loc("export"), systemImage: "square.and.arrow.up")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.purple)
+                .controlSize(.regular)
+                
+                Button {
+                    copyToClipboard()
+                } label: {
+                    Label(loc("copy"), systemImage: "doc.on.doc")
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.purple)
+                .controlSize(.regular)
+                .help(loc("copy_hint"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
     private var editedAttendeesList: [String] {
         let s = viewModel.currentMeeting?.attendees ?? ""
         if s.isEmpty { return [] }
@@ -39,13 +156,11 @@ struct ReviewingView: View {
                         if viewModel.isTranscribingOffline {
                             HStack(spacing: 8) {
                                 ProgressView().scaleEffect(0.7)
-                                if viewModel.segmentCount > 0, let meeting = viewModel.currentMeeting {
-                                    let estimatedTotal = max(1.0, Double(meeting.duration) / 3.0)
-                                    let pct = min(99, max(1, Int(Double(viewModel.segmentCount) / max(1.0, estimatedTotal) * 100)))
-                                    Text("转写中 \(viewModel.segmentCount)段 (~\(pct)%)")
+                                if let pct = transcriptionPercent {
+                                    Text(String(format: loc("transcribing_segments"), viewModel.segmentCount, pct))
                                         .font(.caption).foregroundStyle(.secondary)
                                 } else {
-                                    Text("转写中...")
+                                    Text(loc("transcribing_progress"))
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -66,64 +181,7 @@ struct ReviewingView: View {
 
                         Divider()
 
-                        // 会议专用工具栏
-                        HStack(spacing: 12) {
-                            Button {
-                                showDebugLog = true
-                            } label: {
-                                Image(systemName: "ladybug")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("调试日志")
-
-                            Spacer()
-
-                            if let meeting = viewModel.currentMeeting, meeting.audioFileExists {
-                                Button {
-                                    if viewModel.transcriptSegments.count > 5 {
-                                        pendingRetryAction = { [weak viewModel] in
-                                            let url = meeting.localAudioURL
-                                            viewModel?.retryOfflineTranscription(for: meeting.id, audioURL: url)
-                                        }
-                                        showRetryConfirm = true
-                                    } else {
-                                        let url = meeting.localAudioURL
-                                        viewModel.retryOfflineTranscription(for: meeting.id, audioURL: url)
-                                    }
-                                } label: {
-                                    Label(viewModel.isTranscribingOffline ? "分析中..." : (viewModel.transcriptSegments.isEmpty ? "重新分析" : "继续分析"),
-                                          systemImage: viewModel.isTranscribingOffline ? "hourglass" : "waveform.badge.magnifyingglass")
-                                        .font(.caption)
-                                }
-                                .disabled(viewModel.isTranscribingOffline)
-                                .buttonStyle(.bordered)
-                                .tint(.purple)
-                                .controlSize(.small)
-                            }
-
-                            Spacer()
-
-                            Button {
-                                copyToClipboard()
-                            } label: {
-                                Label("拷贝", systemImage: "doc.on.doc")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("拷贝纪要到剪贴板")
-
-                            Button {
-                                exportMeetingRecord()
-                            } label: {
-                                Label("导出", systemImage: "square.and.arrow.up")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                        reviewToolbar
                     }
                     .frame(width: 260)
                     .transition(.move(edge: .trailing))
@@ -134,19 +192,39 @@ struct ReviewingView: View {
             #else
             .background(Color(uiColor: .systemGroupedBackground))
             #endif
-            .navigationTitle("会议回顾")
+            .navigationTitle(loc("review_title"))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        viewModel.finishReview()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .help(loc("back"))
+                }
                 ToolbarItemGroup(placement: .primaryAction) {
+#if DEBUG
+                    Button {
+                        showDebugLog = true
+                    } label: {
+                        Image(systemName: "ladybug")
+                    }
+                    .help(loc("debug_log"))
+#endif
                     NavigationLink(destination: SettingsView()) {
-                        Label("配置", systemImage: "gearshape")
-                    }.help("系统配置")
+                        Image(systemName: "gearshape")
+                    }
+                    .frame(width: 32)
+                    .help(loc("settings"))
 
                     NavigationLink(destination: PersonnelManagementView()) {
-                        Label("人员与声纹", systemImage: "person.3.sequence")
-                    }.help("全局人员与声纹管理")
+                        Image(systemName: "person.2")
+                    }
+                    .frame(width: 32)
+                    .help(loc("personnel_voiceprint_help"))
 
                     Button {
                         withAnimation { showInspector.toggle() }
@@ -154,13 +232,8 @@ struct ReviewingView: View {
                         Image(systemName: "sidebar.right")
                             .foregroundStyle(showInspector ? .purple : .secondary)
                     }
-                    .help("会议属性检查器")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        viewModel.finishReview()
-                    }
-                    .fontWeight(.bold)
+                    .frame(width: 32)
+                    .help(loc("meeting_inspector"))
                 }
             }
             .onAppear {
@@ -168,7 +241,9 @@ struct ReviewingView: View {
             }
             .onChange(of: viewModel.transcriptSegments.map(\.speakerLabel)) { _, labels in
                 for label in labels {
-                    addAttendeeFromLabel(label)
+                    let trimmed = label.trimmingCharacters(in: .whitespaces)
+                    guard !trimmed.isEmpty, !trimmed.hasPrefix("Speaker_") else { continue }
+                    addAttendeeFromLabel(trimmed)
                 }
             }
             .onChange(of: viewModel.audioPlayer.currentTime) { _, time in
@@ -179,14 +254,14 @@ struct ReviewingView: View {
             .sheet(isPresented: $showDebugLog) {
                 DebugLogView()
             }
-            .alert("确认重新转写", isPresented: $showRetryConfirm) {
-                Button("取消", role: .cancel) { pendingRetryAction = nil }
-                Button("确认", role: .destructive) {
+            .alert(loc("confirm_retranscribe"), isPresented: $showRetryConfirm) {
+                Button(loc("cancel"), role: .cancel) { pendingRetryAction = nil }
+                Button(loc("confirm"), role: .destructive) {
                     pendingRetryAction?()
                     pendingRetryAction = nil
                 }
             } message: {
-                Text("已有 \(viewModel.transcriptSegments.count) 段转写结果，重新转写将覆盖现有内容且耗时较长（约 5-10 分钟），是否继续？")
+                Text(String(format: loc("confirm_retranscribe_msg"), viewModel.transcriptSegments.count))
             }
         }
     }
@@ -197,14 +272,12 @@ struct ReviewingView: View {
         let current = attendeesString
         var list = current.isEmpty ? [] : current.split(separator: " ").map(String.init)
         guard !list.contains(trimmed) else {
-            try? "[Mttone] SKIP: \(trimmed) already in '\(current)'".write(toFile: "/tmp/auranote_debug.log", atomically: true, encoding: .utf8)
             return
         }
         list.append(trimmed)
         let newList = list.joined(separator: " ")
         attendeesString = newList
         viewModel.addAttendee(trimmed)
-        try? "[Mttone] DONE: \(trimmed) → '\(newList)' (attendeesString now: \(attendeesString))".write(toFile: "/tmp/auranote_debug.log", atomically: true, encoding: .utf8)
     }
 
     // MARK: - 空白文本加载视图
@@ -212,7 +285,7 @@ struct ReviewingView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .controlSize(.large)
-            Text("正在使用本地大模型高精度转写...")
+            Text(loc("transcribing_hint"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -224,7 +297,7 @@ struct ReviewingView: View {
             if viewModel.isTranscribingOffline {
                 ProgressView()
                     .controlSize(.large)
-                Text("正在转写中...")
+                Text(loc("transcribing_progress"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
@@ -232,14 +305,14 @@ struct ReviewingView: View {
                     .font(.largeTitle)
                     .foregroundStyle(.quaternary)
                 if meeting.status == .pendingDiarization || meeting.status == .completed || meeting.status == .processingLlm {
-                    Text("转写数据缺失")
+                    Text(loc("transcript_missing"))
                         .font(.headline)
                         .foregroundStyle(.secondary)
-                    Text("录音文件可能尚未完成离线转写")
+                    Text(loc("transcript_missing_hint"))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     if meeting.audioFileExists {
-                        Button("重新运行离线转写") {
+                        Button(loc("rerun_transcription")) {
                             viewModel.isTranscribingOffline = true
                             let url = meeting.localAudioURL
                             viewModel.retryOfflineTranscription(for: meeting.id, audioURL: url)
@@ -247,16 +320,16 @@ struct ReviewingView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.purple)
                     } else {
-                        Text("录音文件不存在")
+                        Text(loc("audio_file_not_found"))
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
                 } else {
-                    Text("暂无转写内容")
+                    Text(loc("no_transcript"))
                         .font(.headline)
                         .foregroundStyle(.secondary)
                 }
-                Button("从数据库加载") {
+                Button(loc("load_from_db")) {
                     viewModel.loadSegmentsFromDatabase(meetingId: meeting.id)
                 }
                 .buttonStyle(.bordered)
@@ -311,7 +384,7 @@ struct ReviewingView: View {
                     if let location = meeting.location {
                         Label(location, systemImage: "mappin")
                     }
-                    Label("\(viewModel.transcriptSegments.filter { $0.isFinal }.count) 段", systemImage: "text.bubble")
+                    Label(String(format: loc("segments_count"), viewModel.transcriptSegments.filter { $0.isFinal }.count), systemImage: "text.bubble")
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -400,11 +473,12 @@ struct ReviewingView: View {
     private func copyToClipboard() {
         guard let meeting = viewModel.currentMeeting else { return }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
+        let notSpec = loc("not_specified")
         var text = """
-        会议主题: \(meeting.title)
-        会议地点: \(meeting.location ?? "未指定")
-        开始时间: \(f.string(from: meeting.createdAt))
-        参会人员: \(meeting.attendees ?? "未指定")
+        \(String(format: loc("copy_topic"), meeting.title))
+        \(String(format: loc("copy_location"), meeting.location ?? notSpec))
+        \(String(format: loc("copy_time"), f.string(from: meeting.createdAt)))
+        \(String(format: loc("copy_attendees"), meeting.attendees ?? notSpec))
 
         """
 
@@ -435,16 +509,17 @@ struct ReviewingView: View {
         guard let meeting = viewModel.currentMeeting else { return }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let notSpec = loc("not_specified")
 
         var text = """
-        会议主题: \(meeting.title)
-        会议地点: \(meeting.location ?? "未指定")
-        开始时间: \(formatter.string(from: meeting.createdAt))
-        录音时长: \(formatDuration(TimeInterval(meeting.duration)))
-        参会人员: \(meeting.attendees ?? "未指定")
+        \(String(format: loc("copy_topic"), meeting.title))
+        \(String(format: loc("copy_location"), meeting.location ?? notSpec))
+        \(String(format: loc("copy_time"), formatter.string(from: meeting.createdAt)))
+        \(String(format: loc("record_duration_fmt"), formatDuration(TimeInterval(meeting.duration))))
+        \(String(format: loc("copy_attendees"), meeting.attendees ?? notSpec))
         
         ========================================
-        会议记录
+        \(loc("export_record_title"))
         ========================================
         
         """
@@ -457,7 +532,7 @@ struct ReviewingView: View {
 
         #if os(macOS)
         let savePanel = NSSavePanel()
-        savePanel.title = "导出会议记录"
+        savePanel.title = loc("export_meeting_record")
         savePanel.nameFieldStringValue = "\(meeting.title).txt"
         savePanel.allowedContentTypes = [.plainText]
         savePanel.canCreateDirectories = true
@@ -469,7 +544,7 @@ struct ReviewingView: View {
 
     private func formatDuration(_ t: TimeInterval) -> String {
         let mins = Int(t)/60, secs = Int(t)%60
-        return "\(mins)分\(secs)秒"
+        return String(format: loc("duration_min_sec"), mins, secs)
     }
 
     private func playSegment(_ segment: TranscriptSegment) {
@@ -486,7 +561,4 @@ struct ReviewingView: View {
         }
     }
 
-    private func addAttendeeFromTranscript(_ name: String) {
-        viewModel.addAttendee(name)
-    }
 }

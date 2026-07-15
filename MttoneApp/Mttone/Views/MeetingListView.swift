@@ -14,7 +14,7 @@ struct MeetingListView: View {
     @State private var showDeleteSheet = false
     @State private var deleteGroupMeetings: [Meeting] = []
     @State private var deleteGroupClipCounts: [String: Int] = [:]
-    @State private var isExportingFile = false
+    @State private var downloadStateVersion = 0
 
     var body: some View {
         NavigationStack {
@@ -37,30 +37,33 @@ struct MeetingListView: View {
             #else
             .background(Color(uiColor: .systemGroupedBackground))
             #endif
-            .navigationTitle("听纪")
+            .navigationTitle(loc("app_title"))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     NavigationLink(destination: SettingsView()) {
-                        Label("配置", systemImage: "gearshape")
+                        Image(systemName: "gearshape")
                     }
+                    .frame(width: 32)
+                    .help(loc("settings"))
 
                     NavigationLink(destination: PersonnelManagementView()) {
-                        Label("人员与声纹", systemImage: "person.3.sequence")
+                        Image(systemName: "person.2")
                     }
-                    .help("全局人员与声纹管理")
+                    .frame(width: 32)
+                    .help(loc("personnel_voiceprint_help"))
 
                     Button {
                         recordingVM.onTapStartRecording()
                     } label: {
-                        Label("开始会议", systemImage: "pencil.and.list.clipboard")
-                            .font(.headline)
+                        Image(systemName: "pencil.and.list.clipboard")
+                            .foregroundStyle(.purple)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.purple)
-                    .disabled(SettingsManager.shared.isModelDownloading || SettingsManager.shared.modelVersion.isEmpty)
+                    .frame(width: 32)
+                    .help(loc("start_meeting"))
+                    .disabled(!SettingsManager.shared.anyModelAvailable)
                 }
             }
             .sheet(isPresented: $recordingVM.showNewMeetingSheet) {
@@ -81,10 +84,10 @@ struct MeetingListView: View {
                     }
                 )
             }
-            .alert("权限不足", isPresented: $showPermissionAlert) {
-                Button("确定", role: .cancel) { }
+            .alert(loc("permission_insufficient"), isPresented: $showPermissionAlert) {
+                Button(loc("confirm"), role: .cancel) { }
             } message: {
-                Text("\(permissionAlertMessage)\n\n请前往「系统设置 - 隐私与安全性 - 麦克风/语音识别」中开启权限。")
+                Text("\(permissionAlertMessage)\n\n\(loc("permission_hint"))")
             }
             .onAppear {
                 // 检测已下载的模型版本
@@ -112,6 +115,9 @@ struct MeetingListView: View {
                     listVM?.loadMeetings()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: SettingsManager.downloadStateDidChangeNotification)) { _ in
+                downloadStateVersion += 1
+            }
         }
     }
 
@@ -121,18 +127,24 @@ struct MeetingListView: View {
         let settings = SettingsManager.shared
         return HStack {
             Image(systemName: "bolt.fill").foregroundStyle(.green)
-            Text("准备就绪").font(.subheadline).foregroundStyle(.secondary)
+            Text(loc("status_ready")).font(.subheadline).foregroundStyle(.secondary)
             Spacer()
-            if settings.isModelDownloading {
+            if settings.currentModelDownloading {
                 ProgressView().scaleEffect(0.7)
-                Text("正在下载语音模型... \(Int(settings.modelDownloadProgress * 100))%")
+                Text("\(loc("model_downloading")) \(Int(settings.currentModelProgress * 100))%")
                     .font(.caption).foregroundStyle(.orange)
-            } else if settings.modelVersion.isEmpty {
+            } else if settings.allModelsUnavailable {
                 Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
-                Text("语音模型未下载").font(.caption).foregroundStyle(.orange)
-            } else {
+                Text(loc("voice_model_not_ready")).font(.caption).foregroundStyle(.orange)
+            } else if let availableModel = settings.allVoices.first(where: {
+                let s = settings.downloadState(for: $0)
+                return s.isDownloaded && !s.isDownloading
+            }) {
                 Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
-                Text("\(settings.modelVersion) 已就绪").font(.caption).foregroundStyle(.secondary)
+                Text("\(availableModel) \(loc("model_ready_suffix"))").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                Text(loc("voice_model_not_ready")).font(.caption).foregroundStyle(.orange)
             }
         }
         .padding()
@@ -145,10 +157,10 @@ struct MeetingListView: View {
             Image(systemName: "waveform.circle")
                 .font(.system(size: 64))
                 .foregroundStyle(.quaternary)
-            Text("暂无会议记录")
+            Text(loc("no_meetings"))
                 .font(.title3)
                 .foregroundStyle(.secondary)
-            Text("点击右上角「开始会议」选择录音模式")
+            Text(loc("start_meeting_hint"))
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -162,36 +174,21 @@ struct MeetingListView: View {
                 let finalPath = meeting.localAudioURL.path
                 recordingVM.currentMeeting?.audioPath = finalPath
 
-                let log = { (msg: String) in
-                    let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-                    let line = "\(df.string(from: Date())) [Duration] \(msg)\n"
-                    if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                        h.seekToEndOfFile(); h.write(d); h.closeFile()
-                    }
-                }
-
-                log("打开会议: id=\(meeting.id), DB时长=\(meeting.duration)s, 音频路径=\(finalPath), 文件存在=\(FileManager.default.fileExists(atPath: finalPath))")
-
                 // 探测音频实际时长
                 var duration = TimeInterval(meeting.duration)
                 if let player = try? AVAudioPlayer(contentsOf: URL(fileURLWithPath: finalPath)) {
                     if player.duration > 0 {
                         duration = player.duration
-                        log("AVAudioPlayer探测时长: \(Int(duration))s")
-                    } else {
-                        log("AVAudioPlayer返回时长=0")
                     }
-                } else {
-                    log("AVAudioPlayer初始化失败")
                 }
                 recordingVM.audioPlayer.duration = duration
                 recordingVM.audioPlayer.currentTime = 0
-                log("最终设置 audioPlayer.duration = \(Int(duration))s")
 
                 recordingVM.loadSegmentsFromDatabase(meetingId: meeting.id)
                 recordingVM.meetingStatus = .reviewing
             } label: {
                 MeetingRow(meeting: meeting)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .contextMenu {
@@ -204,7 +201,7 @@ struct MeetingListView: View {
                     deleteGroupClipCounts = counts
                     showDeleteSheet = true
                 } label: {
-                    Label("删除会议", systemImage: "trash")
+                    Label(loc("delete_meeting"), systemImage: "trash")
                 }
             }
         }
@@ -216,7 +213,7 @@ struct MeetingListView: View {
         guard FileManager.default.fileExists(atPath: sourcePath) else { return }
         #if os(macOS)
         let savePanel = NSSavePanel()
-        savePanel.title = "另存录音文件"
+        savePanel.title = loc("save_recording")
         savePanel.nameFieldStringValue = sourceURL.lastPathComponent
         savePanel.allowedContentTypes = [.audio]
         savePanel.canCreateDirectories = true
@@ -266,6 +263,12 @@ struct MeetingRow: View {
             statusBadge
         }
         .padding(.vertical, 4)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.12))
+                .frame(height: 1)
+                .padding(.leading, 64)
+        }
     }
 
     private var statusIcon: some View {
@@ -304,10 +307,10 @@ struct MeetingRow: View {
 
     private var statusText: String {
         switch meeting.status {
-        case .recording: return "录音中"
-        case .pendingDiarization: return "未分离"
-        case .processingLlm: return "分离未完成"
-        case .completed: return "完成分离"
+        case .recording: return loc("status_recording")
+        case .pendingDiarization: return loc("status_pending_diarization")
+        case .processingLlm: return loc("status_processing_llm")
+        case .completed: return loc("status_completed")
         }
     }
 
@@ -347,7 +350,7 @@ struct DeleteMeetingSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("删除会议")
+                Text(loc("delete_meeting"))
                     .font(.headline)
                 Spacer()
             }
@@ -357,7 +360,7 @@ struct DeleteMeetingSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("以下关联会议将被删除（含录音文件、转写文本和说话人分离数据），此操作不可撤销。在删除前，您可以点击录音文件右侧的导出按钮手动导出所需文件。")
+                    Text(loc("delete_confirm_detail"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -379,7 +382,7 @@ struct DeleteMeetingSheet: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                     let fileName = URL(fileURLWithPath: meeting.audioPath).lastPathComponent
-                                    Text("录音文件: \(fileName)")
+                                    Text("\(loc("audio_file_label")): \(fileName)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
@@ -391,7 +394,7 @@ struct DeleteMeetingSheet: View {
                                             .font(.caption)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("另存录音文件")
+                                    .help(loc("save_recording"))
                                 }
 
                                 let clipCount = speechClipCounts[meeting.id] ?? 0
@@ -399,12 +402,12 @@ struct DeleteMeetingSheet: View {
                                     Image(systemName: "bubble.left.and.bubble.right")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
-                                    Text("语音剪辑: \(clipCount) 条")
+                                    Text("\(loc("voice_clips_label")): \(clipCount)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
 
-                                Text("创建: \(meeting.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                Text("\(loc("created_label")): \(meeting.createdAt.formatted(date: .abbreviated, time: .shortened))")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
@@ -420,7 +423,7 @@ struct DeleteMeetingSheet: View {
                                     .fill(.purple.opacity(0.2))
                                     .frame(width: 2, height: 16)
                                     .padding(.leading, 30)
-                                Text("延续")
+                                Text(loc("extend_label"))
                                     .font(.caption2)
                                     .foregroundStyle(.purple.opacity(0.6))
                                     .padding(.leading, 8)
@@ -434,7 +437,7 @@ struct DeleteMeetingSheet: View {
             Divider()
 
             HStack(spacing: 12) {
-                Button("取消") { dismiss() }
+                Button(loc("cancel")) { dismiss() }
                     .controlSize(.large)
                     .keyboardShortcut(.cancelAction)
 
@@ -444,7 +447,7 @@ struct DeleteMeetingSheet: View {
                     onDelete()
                     dismiss()
                 } label: {
-                    Label("确认删除", systemImage: "trash")
+                    Label(loc("confirm_delete"), systemImage: "trash")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -468,10 +471,10 @@ struct DeleteMeetingSheet: View {
 
     private func statusText(_ meeting: Meeting) -> String {
         switch meeting.status {
-        case .recording: return "录音中"
-        case .pendingDiarization: return "待分离"
-        case .processingLlm: return "AI 处理中"
-        case .completed: return "已完成"
+        case .recording: return loc("status_recording")
+        case .pendingDiarization: return loc("status_pending")
+        case .processingLlm: return loc("status_ai_processing")
+        case .completed: return loc("status_done")
         }
     }
 

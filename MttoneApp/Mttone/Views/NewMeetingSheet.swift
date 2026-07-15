@@ -26,7 +26,7 @@ struct NewMeetingSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("新建会议")
+                Text(loc("new_meeting"))
                     .font(.headline)
                 Spacer()
             }
@@ -38,26 +38,26 @@ struct NewMeetingSheet: View {
                 // 1. 会议语言 与 会议主题 (共用一行)
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("会议语言")
+                        Text(loc("meeting_language"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
                         Picker("", selection: $viewModel.formSpeechLang) {
-                            Text("中文").tag("zh")
+                            Text(loc("chinese")).tag("zh")
                             Text("English").tag("en")
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-                        .frame(width: 160)
-                        .padding(.vertical, 4)
+                        .frame(maxWidth: 220)
+                        .padding(.vertical, 2)
                     }
                     
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("会议主题")
+                        Text(loc("meeting_topic"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        TextField("输入会议主题", text: $viewModel.formTitle)
+                        TextField(loc("enter_topic"), text: $viewModel.formTitle)
                             .textFieldStyle(.plain)
                             .padding(10)
                             .background(.quaternary.opacity(0.5))
@@ -68,43 +68,42 @@ struct NewMeetingSheet: View {
                 // 2. 开始时间 与 会议地点 (共用一行)
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("开始时间")
+                        Text(loc("start_time"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
                         Button {
                             showDatePickerPopover = true
                         } label: {
-                            HStack {
+                            HStack(spacing: 8) {
                                 Image(systemName: "calendar")
                                     .foregroundStyle(.purple)
+                                    .font(.subheadline)
                                 Text(formattedFormDate)
                                     .font(.subheadline)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
                             .background(.quaternary.opacity(0.5))
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
-                        .frame(width: 160)
                         .popover(isPresented: $showDatePickerPopover) {
-                            VStack {
-                                DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
-                                    .datePickerStyle(.graphical)
-                                    .labelsHidden()
-                            }
-                            .padding()
-                            .frame(width: 280, height: 320)
+                            DatePicker("", selection: $viewModel.formCreatedAt, displayedComponents: [.date, .hourAndMinute])
+                                .datePickerStyle(.graphical)
+                                .labelsHidden()
+                                .padding(12)
                         }
                     }
+                    .frame(maxWidth: 220)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("会议地点")
+                        Text(loc("meeting_location"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        TextField("输入地点", text: $viewModel.formLocation)
+                        TextField(loc("enter_location"), text: $viewModel.formLocation)
                             .textFieldStyle(.plain)
                             .padding(10)
                             .background(.quaternary.opacity(0.5))
@@ -123,12 +122,12 @@ struct NewMeetingSheet: View {
                     if !filtered.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
-                                ForEach(filtered.prefix(8), id: \.self) { loc in
+                                ForEach(filtered.prefix(8), id: \.self) { suggestion in
                                     Button {
-                                        viewModel.formLocation = loc
+                                        viewModel.formLocation = suggestion
                                         showLocationSuggestions = false
                                     } label: {
-                                        Text(loc)
+                                        Text(suggestion)
                                             .font(.caption)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 4)
@@ -146,7 +145,7 @@ struct NewMeetingSheet: View {
 
                 // 3. 参会人（从全局人员库多选）
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("参会人")
+                    Text(loc("attendees"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -172,7 +171,7 @@ struct NewMeetingSheet: View {
                     } label: {
                         HStack {
                             Image(systemName: "person.3.sequence").font(.caption)
-                            Text("从全局人员库选择...")
+                            Text(loc("select_from_personnel"))
                                 .font(.subheadline)
                             Spacer()
                         }
@@ -194,7 +193,7 @@ struct NewMeetingSheet: View {
 
                   // 4. 音频来源
                   VStack(alignment: .leading, spacing: 6) {
-                      Text("音频来源")
+                      Text(loc("audio_source"))
                           .font(.caption)
                           .foregroundStyle(.secondary)
                       
@@ -202,13 +201,12 @@ struct NewMeetingSheet: View {
                           HStack(spacing: 12) {
                               // 实时录音 RadioButton
                               Button {
-                                  print("[NewMeetingSheet] Live Recording RadioButton clicked.")
                                   viewModel.recordingMode = .liveRecording
                               } label: {
                                   HStack(spacing: 6) {
                                       Image(systemName: viewModel.recordingMode == .liveRecording ? "largecircle.fill.circle" : "circle")
                                           .foregroundStyle(viewModel.recordingMode == .liveRecording ? .purple : .secondary)
-                                      Text("实时录音")
+                                      Text(loc("live_recording"))
                                           .font(.subheadline)
                                   }
                               }
@@ -217,26 +215,25 @@ struct NewMeetingSheet: View {
 
                               // 音频文件 RadioButton
                               Button {
-                                  print("[NewMeetingSheet] Audio File RadioButton clicked.")
                                   viewModel.recordingMode = .importFile
                               } label: {
                                   HStack(spacing: 6) {
                                       Image(systemName: viewModel.recordingMode == .importFile ? "largecircle.fill.circle" : "circle")
                                           .foregroundStyle(viewModel.recordingMode == .importFile ? .purple : .secondary)
-                                      Text("音频文件")
+                                      Text(loc("audio_file"))
                                           .font(.subheadline)
                                   }
                               }
                               .buttonStyle(.plain)
                               .contentShape(Rectangle())
                           }
-                          .frame(width: 160, alignment: .leading)
+                          .frame(maxWidth: 220, alignment: .leading)
                           
                           // 如果选择音频文件，展示文件名框 and 选择按钮
                           if viewModel.recordingMode == .importFile {
                               HStack(spacing: 8) {
                                   // 文件名称框
-                                  Text(originalAudioFileName.isEmpty ? "未选择音频文件" : originalAudioFileName)
+                                  Text(originalAudioFileName.isEmpty ? loc("no_audio_selected") : originalAudioFileName)
                                       .font(.subheadline)
                                       .foregroundStyle(originalAudioFileName.isEmpty ? .secondary : .primary)
                                       .lineLimit(1)
@@ -258,7 +255,7 @@ struct NewMeetingSheet: View {
                                           .clipShape(RoundedRectangle(cornerRadius: 6))
                                   }
                                   .buttonStyle(.plain)
-                                  .help("选择音频文件")
+                                  .help(loc("select_audio_file"))
                               }
                               .transition(.opacity)
                           } else {
@@ -271,9 +268,9 @@ struct NewMeetingSheet: View {
 
                 // 5. 延续历史会议
                 HStack(spacing: 16) {
-                    Toggle("延续历史会议", isOn: $viewModel.shouldExtendLastMeeting)
+                    Toggle(loc("extend_meeting"), isOn: $viewModel.shouldExtendLastMeeting)
                         .font(.subheadline)
-                        .frame(width: 160, alignment: .leading)
+                        .frame(maxWidth: 220, alignment: .leading)
 
                     if viewModel.shouldExtendLastMeeting && !recentMeetings.isEmpty {
                         Picker("", selection: $viewModel.selectedParentMeetingId) {
@@ -292,7 +289,7 @@ struct NewMeetingSheet: View {
             Divider()
 
             HStack(spacing: 12) {
-                Button("取消") {
+                Button(loc("cancel")) {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
@@ -323,7 +320,7 @@ struct NewMeetingSheet: View {
                         }
                     }
                 } label: {
-                    Label("开始", systemImage: "play.fill")
+                    Label(loc("start"), systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -335,7 +332,7 @@ struct NewMeetingSheet: View {
         }
         .frame(minWidth: 440, idealWidth: 480)
         .onAppear {
-            locationSuggestions = databaseManager.fetchDistinctLocations()
+            locationSuggestions = databaseManager.fetchDistinctLocations(excludeExternal: loc("external_import"))
             if !viewModel.formAttendees.isEmpty {
                 attendees = viewModel.formAttendees
                     .split(separator: " ")
@@ -363,7 +360,6 @@ struct NewMeetingSheet: View {
     }
 
     private func selectAudioFile() {
-        print("[NewMeetingSheet] selectAudioFile() called via NSOpenPanel runModal")
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -371,9 +367,7 @@ struct NewMeetingSheet: View {
         panel.allowedContentTypes = [UTType.audio]
         
         let response = panel.runModal()
-        print("[NewMeetingSheet] NSOpenPanel runModal finished. Response: \(response)")
         if response == .OK, let url = panel.url {
-            print("[NewMeetingSheet] User selected file: \(url.path)")
             let gained = url.startAccessingSecurityScopedResource()
             defer {
                 if gained {
@@ -388,12 +382,8 @@ struct NewMeetingSheet: View {
                 try FileManager.default.copyItem(at: url, to: tempURL)
                 tempSelectedAudioURL = tempURL
                 originalAudioFileName = url.lastPathComponent
-                print("[NewMeetingSheet] Successfully copied to temp location: \(tempURL.path)")
             } catch {
-                print("[NewMeetingSheet] Copy temp file failed: \(error)")
             }
-        } else {
-            print("[NewMeetingSheet] NSOpenPanel was cancelled or failed")
         }
     }
 }

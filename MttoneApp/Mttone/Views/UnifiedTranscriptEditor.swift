@@ -39,7 +39,7 @@ struct UnifiedTranscriptEditor: View {
                 HStack {
                     Image(systemName: "line.3.horizontal.decrease.circle.fill")
                         .foregroundStyle(.purple)
-                    Text("过滤: \(filter)").font(.subheadline).foregroundStyle(.purple)
+                    Text(String(format: loc("filter_prefix"), filter)).font(.subheadline).foregroundStyle(.purple)
                     Spacer()
                     Button { filterSpeaker = nil } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
@@ -51,7 +51,7 @@ struct UnifiedTranscriptEditor: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 3) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(displayedSegments, id: \.1.id) { displayedIdx, seg in
                             TranscriptRow(
                                 segment: seg,
@@ -81,6 +81,14 @@ struct UnifiedTranscriptEditor: View {
                                 onPlay: { onPlaySegment?(seg) }
                             )
                             .id(seg.id)
+                            
+                            // 淡分割线（非最后一项）
+                            if displayedIdx != displayedSegments.last?.0 {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.12))
+                                    .frame(height: 1)
+                                    .padding(.leading, 80)
+                            }
                         }
                     }
                 }
@@ -97,8 +105,11 @@ struct UnifiedTranscriptEditor: View {
     private func splitAfter(_ idx: Int, text: String) {
         guard idx < segments.count else { return }
         let seg = segments[idx]
+        // 基于文本长度比例估算新段时长，最少 1 秒
+        let totalLen = max(1, seg.text.count + text.count)
+        let estimatedDuration = max(1.0, Double(text.count) / Double(totalLen) * (seg.endTime - seg.startTime))
         segments.insert(TranscriptSegment(
-            id: UUID().uuidString, startTime: seg.endTime, endTime: seg.endTime + 5,
+            id: UUID().uuidString, startTime: seg.endTime, endTime: seg.endTime + estimatedDuration,
             text: text, speakerLabel: seg.speakerLabel, contactId: seg.contactId, isFinal: true
         ), at: idx + 1)
     }
@@ -134,6 +145,7 @@ struct TranscriptRow: View {
     @State private var newSpeakerName = ""
     @State private var skipNextNewlineCheck = false
     @State private var isHovered = false
+    @State private var textEditorHeight: CGFloat = 44
 
     init(segment: TranscriptSegment, isFirst: Bool, isActive: Bool, existingSpeakers: [String], attendees: [String], speakerColor: Color, onTextChange: @escaping (String) -> Void, onSpeakerChange: @escaping (String) -> Void, onMergeUp: @escaping () -> Void, onSplitAfter: @escaping (String) -> Void, onPlay: (() -> Void)? = nil) {
         self.segment = segment; self.isFirst = isFirst; self.isActive = isActive
@@ -148,7 +160,7 @@ struct TranscriptRow: View {
             HStack(spacing: 6) {
                 Button(action: { onPlay?() }) {
                     Image(systemName: "play.circle.fill").font(.caption).foregroundStyle(.blue)
-                }.buttonStyle(.plain).help("播放")
+                }.buttonStyle(.plain).help(loc("play"))
 
                 Text(formatTime(segment.startTime))
                     .font(.system(.caption, design: .monospaced)).foregroundStyle(.tertiary)
@@ -156,7 +168,7 @@ struct TranscriptRow: View {
                 Menu {
                     let otherAttendees = attendees.filter { $0 != segment.speakerLabel }
                     if !otherAttendees.isEmpty {
-                        Section("参会人") {
+                        Section(loc("attendees_section")) {
                             ForEach(otherAttendees, id: \.self) { person in
                                 Button(person) { onSpeakerChange(person) }
                             }
@@ -164,12 +176,12 @@ struct TranscriptRow: View {
                     }
                     let otherSpeakers = existingSpeakers.filter { !attendees.contains($0) }
                     if !otherSpeakers.isEmpty {
-                        Section("其他说话人") {
+                        Section(loc("other_speakers")) {
                             ForEach(otherSpeakers, id: \.self) { s in Button(s) { onSpeakerChange(s) } }
                         }
                     }
                     Divider()
-                    Button("新建...") { newSpeakerName = ""; showRenamePopover = true }
+                    Button(loc("new_ellipsis")) { newSpeakerName = ""; showRenamePopover = true }
                 } label: {
                     Text(String(segment.speakerLabel.prefix(10)))
                         .font(.caption).fontWeight(.semibold).foregroundStyle(.white)
@@ -179,11 +191,11 @@ struct TranscriptRow: View {
                 .menuStyle(.button).buttonStyle(.plain)
                 .popover(isPresented: $showRenamePopover) {
                     VStack(spacing: 8) {
-                        Text("新建说话人").font(.caption).foregroundStyle(.secondary)
-                        TextField("姓名", text: $newSpeakerName).textFieldStyle(.roundedBorder).onSubmit { confirmRename() }
+                        Text(loc("new_speaker")).font(.caption).foregroundStyle(.secondary)
+                        TextField(loc("name"), text: $newSpeakerName).textFieldStyle(.roundedBorder).onSubmit { confirmRename() }
                         HStack {
-                            Spacer(); Button("取消") { showRenamePopover = false }
-                            Button("确定") { confirmRename() }.buttonStyle(.borderedProminent)
+                            Spacer(); Button(loc("cancel")) { showRenamePopover = false }
+                            Button(loc("confirm")) { confirmRename() }.buttonStyle(.borderedProminent)
                         }
                     }.padding().frame(width: 200)
                 }
@@ -197,7 +209,7 @@ struct TranscriptRow: View {
                 if !isFirst {
                     Button(action: onMergeUp) {
                         Image(systemName: "arrow.up").font(.system(size: 9, weight: .bold)).foregroundStyle(.orange.opacity(0.7))
-                    }.buttonStyle(.plain).help("合并")
+                    }.buttonStyle(.plain).help(loc("merge"))
                 }
             }
 
@@ -206,10 +218,13 @@ struct TranscriptRow: View {
                 Spacer().frame(width: 22)  // ▶ 按钮宽度
                 Spacer().frame(width: 42)  // 时间戳宽度
                 TextEditor(text: $editText)
-                    .font(.body).scrollContentBackground(.hidden)
+                    .font(.body)
+                    .lineSpacing(6)
+                    .scrollContentBackground(.hidden)
                     .scrollIndicators(.never)
-                    .frame(minHeight: 22)
+                    .frame(minHeight: 22, idealHeight: textEditorHeight, maxHeight: textEditorHeight)
                 .onChange(of: editText) { _, newValue in
+                    recalcEditorHeight(newValue)
                     if skipNextNewlineCheck { skipNextNewlineCheck = false; return }
                     if newValue.contains("\n") {
                         let parts = newValue.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
@@ -229,6 +244,7 @@ struct TranscriptRow: View {
         }
         .onHover { h in withAnimation(.easeInOut(duration: 0.1)) { isHovered = h } }
         .onChange(of: segment.text) { _, newText in skipNextNewlineCheck = newText != editText; editText = newText }
+        .onAppear { recalcEditorHeight(editText) }
     }
     private func formatTime(_ t: Double) -> String {
         let m = Int(t)/60, s = Int(t)%60; return String(format: "%02d:%02d", m, s)
@@ -236,7 +252,29 @@ struct TranscriptRow: View {
     private func formatDuration(_ t: Double) -> String {
         if t < 1 { return "" }
         let m = Int(t)/60, s = Int(t)%60
-        return m > 0 ? "\(m)分\(s)秒" : "\(s)秒"
+        if m > 0 { return String(format: loc("duration_min_sec"), m, s) }
+        return String(format: loc("duration_sec_only"), s)
+    }
+    /// 根据文本内容计算 TextEditor 需要的动态高度
+    private func recalcEditorHeight(_ text: String) {
+        let font = NSFont.preferredFont(forTextStyle: .body)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = 6
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: paragraphStyle
+        ]
+        // 估算可用宽度：假设行宽约 600pt（总宽 - 左侧留白 - 右侧padding）
+        let estimatedWidth: CGFloat = 600
+        let attrStr = NSAttributedString(string: text, attributes: attrs)
+        let rect = attrStr.boundingRect(
+            with: CGSize(width: estimatedWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let newHeight = max(22, ceil(rect.height) + 10)
+        if abs(newHeight - textEditorHeight) > 1 {
+            textEditorHeight = newHeight
+        }
     }
     private func confirmRename() {
         let name = newSpeakerName.trimmingCharacters(in: .whitespaces)

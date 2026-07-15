@@ -31,13 +31,11 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     // MARK: - 控制方法
     
     func startPlaying(url: URL) {
-        print("[AudioPlayer] >>> startPlaying request with URL: \(url.path)")
         stop()
         errorMessage = nil
         
         do {
             #if os(iOS)
-            print("[AudioPlayer] Configuring iOS AVAudioSession Category to .playback...")
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
@@ -45,69 +43,51 @@ final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
             
             // 确保文件存在
             let fileExists = FileManager.default.fileExists(atPath: url.path)
-            print("[AudioPlayer] Checking file existence at \(url.path) -> \(fileExists)")
-            if fileExists {
-                if let attr = try? FileManager.default.attributesOfItem(atPath: url.path) {
-                    let fileSize = attr[.size] as? UInt64 ?? 0
-                    print("[AudioPlayer] Target audio file size is \(fileSize) bytes")
-                }
-            } else {
-                let err = "音频文件不存在: \(url.lastPathComponent)"
+            if !fileExists {
+                let err = String(format: loc("audio_file_not_found_name"), url.lastPathComponent)
                 self.errorMessage = err
-                print("[AudioPlayer] ERROR: \(err)")
                 return
             }
             
-            print("[AudioPlayer] Initializing AVAudioPlayer...")
             let newPlayer = try AVAudioPlayer(contentsOf: url)
             newPlayer.delegate = self
             newPlayer.isMeteringEnabled = true
             newPlayer.volume = volume
             
-            print("[AudioPlayer] Preparing to play...")
-            let prepSuccess = newPlayer.prepareToPlay()
-            print("[AudioPlayer] prepareToPlay result: \(prepSuccess)")
+            _ = newPlayer.prepareToPlay()
             
             self.player = newPlayer
             
-            print("[AudioPlayer] Invoking player.play()...")
             if newPlayer.play() {
                 isPlaying = true
                 duration = newPlayer.duration
-                print("[AudioPlayer] SUCCESS! Playback started. Duration: \(duration)s, Volume: \(volume)")
                 startTimer()
             } else {
                 let err = "AVAudioPlayer.play() returned false"
                 self.errorMessage = err
-                print("[AudioPlayer] ERROR: \(err)")
             }
         } catch {
-            let errMsg = "初始化播放器失败: \(error.localizedDescription)"
+            let errMsg = String(format: loc("player_init_failed"), error.localizedDescription)
             self.errorMessage = errMsg
-            print("[AudioPlayer] ERROR catch block: \(errMsg)")
         }
     }
     
     func pause() {
-        print("[AudioPlayer] Pause requested at currentTime: \(currentTime)s")
         player?.pause()
         isPlaying = false
         stopTimer()
     }
     
     func resume() {
-        print("[AudioPlayer] Resume requested at currentTime: \(currentTime)s")
         if player?.play() == true {
             isPlaying = true
-            print("[AudioPlayer] Playback resumed successfully")
             startTimer()
         } else {
-            print("[AudioPlayer] ERROR: Resume failed")
+            // Resume failed
         }
     }
     
     func stop() {
-        print("[AudioPlayer] Stop requested. Stopping and releasing player...")
         player?.stop()
         player = nil
         isPlaying = false

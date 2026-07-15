@@ -51,7 +51,7 @@ final class AudioRecorder {
         micGranted = true
         #endif
         guard micGranted else {
-            errorMessage = "需要麦克风权限才能录制会议"
+            errorMessage = loc("mic_permission_required")
             return false
         }
         return true
@@ -104,7 +104,7 @@ final class AudioRecorder {
                     let resampled = try AudioProcessor.resampleBuffer(buffer, with: converter)
                     floatArray = AudioProcessor.convertBufferToArray(buffer: resampled)
                 } catch {
-                    print("[AudioRecorder] resampleBuffer error: \(error)")
+                    // resample error
                 }
             }
             
@@ -119,8 +119,6 @@ final class AudioRecorder {
         
         // 启动后台轮询转写循环
         startTranscriptionLoop()
-        
-        print("[Audio] Recording started for meeting: \(meetingId)")
     }
 
     // MARK: - 停止录音
@@ -147,7 +145,6 @@ final class AudioRecorder {
 
         isRecording = false
         currentAmplitude = 0
-        print("[Audio] Recording stopped. Duration: \(duration)s, Segments: \(segments.count)")
 
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false)
@@ -196,7 +193,7 @@ final class AudioRecorder {
                         self.updateSegments()
                     }
                 } catch {
-                    print("[AudioRecorder] transcribeLive error: \(error)")
+                    // transcribeLive error
                 }
             }
         }
@@ -262,7 +259,7 @@ enum RecorderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .microphoneAccessDenied: return "麦克风权限被拒绝"
+        case .microphoneAccessDenied: return loc("mic_permission_denied")
         }
     }
 }

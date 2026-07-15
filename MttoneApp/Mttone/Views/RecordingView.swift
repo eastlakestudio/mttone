@@ -35,7 +35,8 @@ struct RecordingView: View {
                     Image(systemName: "sidebar.right")
                         .foregroundStyle(showInspector ? .purple : .secondary)
                 }
-                .help("会议信息")
+                .frame(width: 32)
+                .help(loc("meeting_info"))
             }
         }
     }
@@ -55,7 +56,7 @@ struct RecordingView: View {
                             .opacity(viewModel.currentAmplitude > 0.01 ? 1 : 0.3)
                             .animation(.easeInOut(duration: 0.3), value: viewModel.currentAmplitude)
                     )
-                Text("录音中")
+                Text(loc("recording"))
                     .font(.headline)
                     .foregroundStyle(.red)
                 Spacer()
@@ -93,7 +94,7 @@ struct RecordingView: View {
                     if viewModel.transcriptSegments.isEmpty {
                         VStack(spacing: 8) {
                             ProgressView()
-                            Text("正在聆听...").font(.subheadline).foregroundStyle(.secondary)
+                            Text(loc("listening")).font(.subheadline).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
@@ -123,7 +124,7 @@ struct RecordingView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "stop.fill")
-                    Text("停止录音")
+                    Text(loc("stop_recording"))
                 }
                 .font(.headline)
                 .foregroundStyle(.white)
@@ -193,7 +194,7 @@ struct TranscriptBubble: View {
                                 .font(.caption).foregroundStyle(.orange)
                         }
                         .buttonStyle(.plain)
-                        .help("合并到上一段")
+                        .help(loc("merge_prev"))
                     }
                     if !segment.isFinal {
                         ProgressView().scaleEffect(0.5)
@@ -203,8 +204,9 @@ struct TranscriptBubble: View {
                 if onTextChange != nil {
                     TextEditor(text: $editedText)
                         .font(.body)
+                        .lineSpacing(6)
                         .scrollContentBackground(.hidden)
-                        .frame(minHeight: 24, maxHeight: 120)
+                        .frame(minHeight: 24)
                         .onChange(of: editedText) { _, newValue in
                             if newValue.contains("\n") {
                                 let parts = newValue.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
@@ -222,6 +224,7 @@ struct TranscriptBubble: View {
                 } else {
                     Text("\(segment.speakerLabel): \(segment.text)")
                         .font(.body)
+                        .lineSpacing(6)
                         .foregroundStyle(segment.isFinal ? .primary : .secondary)
                         .opacity(segment.isFinal ? 1 : 0.7)
                         .frame(minHeight: 20, alignment: .topLeading)
@@ -250,16 +253,16 @@ struct TranscriptBubble: View {
             if onSpeakerChange != nil {
                 Menu {
                     if !attendees.isEmpty {
-                        Section("参会人") {
+                        Section(loc("attendees_section")) {
                             ForEach(attendees, id: \.self) { p in Button(p) { onSpeakerChange?(p) } }
                         }
                     }
                     if !otherContacts.isEmpty {
-                        Section("全局人员") {
+                        Section(loc("global_staff")) {
                             ForEach(otherContacts, id: \.self) { n in Button(n) { onSpeakerChange?(n) } }
                         }
                     }
-                    Section { Button("新建说话人...") { newSpeakerTempName = ""; showRenamePopover = true } }
+                    Section { Button(loc("new_speaker_ellipsis")) { newSpeakerTempName = ""; showRenamePopover = true } }
                 } label: {
                     Text(segment.speakerLabel)
                         .font(.caption).fontWeight(.bold)
@@ -270,13 +273,13 @@ struct TranscriptBubble: View {
                 .menuStyle(.button).buttonStyle(.plain)
                 .popover(isPresented: $showRenamePopover) {
                     VStack(spacing: 8) {
-                        Text("新建声纹人").font(.caption).foregroundStyle(.secondary)
-                        TextField("姓名", text: $newSpeakerTempName).textFieldStyle(.roundedBorder)
+                        Text(loc("new_voiceprint")).font(.caption).foregroundStyle(.secondary)
+                        TextField(loc("name"), text: $newSpeakerTempName).textFieldStyle(.roundedBorder)
                             .onSubmit { confirmNewSpeaker() }
                         HStack {
                             Spacer()
-                            Button("取消") { showRenamePopover = false }
-                            Button("确定") { confirmNewSpeaker() }.buttonStyle(.borderedProminent)
+                            Button(loc("cancel")) { showRenamePopover = false }
+                            Button(loc("confirm")) { confirmNewSpeaker() }.buttonStyle(.borderedProminent)
                         }
                     }
                     .padding().frame(width: 200)

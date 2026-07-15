@@ -5,6 +5,7 @@ import Observation
 final class SettingsManager {
     static let shared = SettingsManager()
     static let settingsDidChangeNotification = Notification.Name("AuraNoteSettingsDidChange")
+    static let downloadStateDidChangeNotification = Notification.Name("AuraNoteDownloadStateDidChange")
     
     var defaults: UserDefaults = .standard
     
@@ -22,10 +23,78 @@ final class SettingsManager {
     var modelPath: String = ""
     var selectedVoice: String = "openai/whisper-large-v3"
     var useChinaMirror: Bool = true
-    var isModelDownloading = false
-    var modelDownloadProgress: Double = 0.0
-    var modelDownloadError: String? = nil
-    var downloadingModelVoice: String = ""  // 记录正在下载的模型
+    
+    /// 所有支持的模型列表
+    let allVoices = ["openai/whisper-large-v3", "openai/whisper-large-v3-turbo"]
+    
+    /// 是否已执行过首次双模型就绪后的自动选择（仅触发一次）
+    var hasAutoSelectedModel: Bool = false {
+        didSet {
+            defaults.set(hasAutoSelectedModel, forKey: "has_auto_selected_model")
+        }
+    }
+    
+    /// 每个模型独立的下载状态
+    struct ModelDownloadState: Codable {
+        var isDownloading = false
+        var progress: Double = 0.0
+        var error: String? = nil
+        var isDownloaded = false
+    }
+    var modelDownloadStates: [String: ModelDownloadState] = [:]
+    
+    /// 获取指定模型的下载状态
+    func downloadState(for voice: String) -> ModelDownloadState {
+        return modelDownloadStates[voice] ?? ModelDownloadState()
+    }
+    
+    /// 设置指定模型的下载状态
+    func setDownloadState(_ state: ModelDownloadState, for voice: String) {
+        modelDownloadStates[voice] = state
+        // 显式通知视图下载状态变化，解决 @Observable 对字典变更追踪不可靠的问题
+        NotificationCenter.default.post(name: Self.downloadStateDidChangeNotification, object: nil)
+    }
+    
+    /// 当前选中模型的下载状态（便捷访问）
+    var currentModelDownloading: Bool {
+        downloadState(for: selectedVoice).isDownloading
+    }
+    var currentModelProgress: Double {
+        downloadState(for: selectedVoice).progress
+    }
+    var currentModelError: String? {
+        downloadState(for: selectedVoice).error
+    }
+    
+    /// 正在下载的模型名称（如果有）
+    var downloadingModelVoice: String {
+        modelDownloadStates.first { $0.value.isDownloading }?.key ?? ""
+    }
+    
+    /// 任一模型已下载完成且不在下载中
+    var anyModelAvailable: Bool {
+        allVoices.contains { voice in
+            let state = downloadState(for: voice)
+            return state.isDownloaded && !state.isDownloading
+        }
+    }
+    
+    /// 所有模型均不可用（未下载或下载中）
+    var allModelsUnavailable: Bool {
+        !anyModelAvailable
+    }
+    
+    /// 首次双模型均就绪时，自动选择 large-v3（仅触发一次）
+    func checkAndAutoSelectModel() {
+        guard !hasAutoSelectedModel else { return }
+        let largeV3State = downloadState(for: "openai/whisper-large-v3")
+        let turboState = downloadState(for: "openai/whisper-large-v3-turbo")
+        if largeV3State.isDownloaded && turboState.isDownloaded {
+            selectedVoice = "openai/whisper-large-v3"
+            hasAutoSelectedModel = true
+        }
+    }
+    
     var modelVersion = "" {
         didSet { if !modelVersion.isEmpty { defaults.set(modelVersion, forKey: "current_model_version") } }
     }
@@ -54,6 +123,9 @@ final class SettingsManager {
         return !llmURL.isEmpty && !llmToken.isEmpty
     }
     
+    /// 标记是否已完成首次启动时的文件系统同步（仅首次 load 时执行清理）
+    private var hasPerformedStartupSync = false
+    
     private init() {
         load()
     }
@@ -78,9 +150,11 @@ final class SettingsManager {
         var zhVal = d.string(forKey: "summary_prompt_zh") ?? oldPrompt ?? "你是一个专业的会议纪要整理助手。请将以下会议发言记录整理成结构化的会议纪要，包括：\n1. 会议概要\n2. 主要议题\n3. 决策事项\n4. 待办事项"
         var enVal = d.string(forKey: "summary_prompt_en") ?? "You are a professional meeting assistant. Please organize the following meeting transcript into a structured summary, including:\n1. Overview\n2. Key Topics\n3. Decisions Made\n4. Action Items"
         
+        // 注意：以下中文字符串为旧版本硬编码值，用于迁移判断，不可改为 loc()
         if zhVal == "自定义提示词" || zhVal == "这是一个测试自定义提示词" {
             zhVal = "你是一个专业的会议纪要整理助手。请将以下会议发言记录整理成结构化的会议纪要，包括：\n1. 会议概要\n2. 主要议题\n3. 决策事项\n4. 待办事项"
         }
+        // 注意：比较的是旧版本写入的硬编码值，不可改为 loc()
         if enVal == "自定义提示词" || enVal == "这是一个测试自定义提示词" {
             enVal = "You are a professional meeting assistant. Please organize the following meeting transcript into a structured summary, including:\n1. Overview\n2. Key Topics\n3. Decisions Made\n4. Action Items"
         }
@@ -91,7 +165,9 @@ final class SettingsManager {
         langSetting = d.string(forKey: "ui_language") ?? ""
         selectedVoice = d.string(forKey: "voice_model") ?? "openai/whisper-large-v3"
         useChinaMirror = d.object(forKey: "use_china_mirror") as? Bool ?? true
+        hasAutoSelectedModel = d.bool(forKey: "has_auto_selected_model")
         
+        // 先加载 modelPath，后续文件系统同步需要用到
         let savedPath = d.string(forKey: "model_path") ?? ""
         if !savedPath.isEmpty && FileManager.default.fileExists(atPath: savedPath) {
             modelPath = savedPath
@@ -109,6 +185,45 @@ final class SettingsManager {
                 modelPath = ""
             }
         }
+        
+        // 仅在首次启动时加载持久化的下载状态，后续使用内存中已有状态
+        if !hasPerformedStartupSync {
+            if let savedStatesData = d.data(forKey: "model_download_states"),
+               let decoded = try? JSONDecoder().decode([String: ModelDownloadState].self, from: savedStatesData) {
+                modelDownloadStates = decoded
+            }
+        }
+        // 首次启动时与文件系统同步：以模型目录中的实际文件为准
+        if !hasPerformedStartupSync && !modelPath.isEmpty {
+            hasPerformedStartupSync = true
+            let repoPath = modelPath + "/models/argmaxinc/whisperkit-coreml"
+            for voice in allVoices {
+                let variant: String
+                if voice == "openai/whisper-large-v3-turbo" {
+                    variant = "openai_whisper-large-v3_turbo"
+                } else {
+                    variant = voice.replacingOccurrences(of: "openai/", with: "openai_")
+                }
+                let modelDir = URL(fileURLWithPath: repoPath).appendingPathComponent(variant)
+                let markerURL = modelDir.appendingPathComponent(".download_complete")
+                let fsExists = FileManager.default.fileExists(atPath: markerURL.path)
+                var state = downloadState(for: voice)
+                state.isDownloaded = fsExists
+                // 清除残留的下载中状态（App 被杀后 Task 已消失）
+                if state.isDownloading {
+                    state.isDownloading = false
+                    state.progress = 0.0
+                }
+                setDownloadState(state, for: voice)
+            }
+            // 同步后立即持久化
+            if let encoded = try? JSONEncoder().encode(modelDownloadStates) {
+                d.set(encoded, forKey: "model_download_states")
+            }
+        }
+        
+        // 启动时检查是否首次双模型就绪
+        checkAndAutoSelectModel()
     }
     
     func save() {
@@ -127,6 +242,11 @@ final class SettingsManager {
         d.set(modelPath, forKey: "model_path")
         d.set(selectedVoice, forKey: "voice_model")
         d.set(useChinaMirror, forKey: "use_china_mirror")
+        
+        // 持久化每模型下载状态
+        if let encoded = try? JSONEncoder().encode(modelDownloadStates) {
+            d.set(encoded, forKey: "model_download_states")
+        }
         
         NotificationCenter.default.post(name: SettingsManager.settingsDidChangeNotification, object: nil)
     }

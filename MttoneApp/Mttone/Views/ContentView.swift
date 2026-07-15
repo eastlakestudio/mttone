@@ -18,7 +18,7 @@ struct ContentView: View {
                     ReviewingView(viewModel: vm)
                 }
             } else {
-                ProgressView("正在初始化...")
+                ProgressView(loc("initializing"))
             }
         }
         .onAppear {
@@ -29,7 +29,7 @@ struct ContentView: View {
                 )
             }
         }
-        .alert("错误", isPresented: .init(
+        .alert(loc("error"), isPresented: .init(
             get: { 
                 recordingVM?.errorAlert != nil || recordingVM?.audioPlayer.errorMessage != nil
             },
@@ -38,7 +38,7 @@ struct ContentView: View {
                 recordingVM?.audioPlayer.errorMessage = nil
             } }
         )) {
-            Button("确定", role: .cancel) {}
+            Button(loc("confirm"), role: .cancel) {}
         } message: {
             if let msg = recordingVM?.errorAlert {
                 Text(msg)

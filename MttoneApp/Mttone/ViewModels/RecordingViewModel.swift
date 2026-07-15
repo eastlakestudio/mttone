@@ -82,7 +82,7 @@ final class RecordingViewModel {
 
         // 2. 创建会议记录
         let title = formTitle.isEmpty
-            ? "会议记录_\(formattedDate)"
+            ? String(format: loc("default_meeting_title"), formattedDate)
             : formTitle
 
         // 如果勾选了延续上一次会议，则获取选中的关联会议 ID
@@ -206,19 +206,116 @@ final class RecordingViewModel {
     func retryOfflineTranscription(for meetingId: String, audioURL: URL) {
         runOfflineTranscription(for: meetingId, audioURL: audioURL)
     }
+    
+    /// 仅继续声纹分离（不重新转写），用于已有转写结果但分离未完成/需重做的场景
+    func continueOfflineDiarization(for meetingId: String, audioURL: URL) {
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            AppLog.info("仅声纹分离开始: meeting=\(meetingId)")
+            try? databaseManager.updateMeetingStatus(id: meetingId, status: .processingLlm)
+            isTranscribingOffline = true
+            
+            let currentSegments = self.transcriptSegments
+            
+            let result: DiarizationOutput? = await Task.detached {
+                try? await DiarizationService.shared.diarizeWithEmbeddings(audioURL: audioURL)
+            }.value
+            
+            guard let diarOutput = result else {
+                AppLog.warn("声纹分离失败: meeting=\(meetingId)")
+                await MainActor.run { [weak self] in
+                    self?.isTranscribingOffline = false
+                    try? self?.databaseManager.updateMeetingStatus(id: meetingId, status: .pendingDiarization)
+                }
+                return
+            }
+            
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                self.lastDiarEmbeddings = diarOutput.speakerEmbeddings
+                try? self.databaseManager.saveMeetingEmbeddings(meetingId: meetingId, embeddings: diarOutput.speakerEmbeddings)
+                
+                let speakerCount = Set(diarOutput.segments.map(\.speakerId)).count
+                AppLog.info("声纹分离完成: \(speakerCount) 个说话人, \(diarOutput.segments.count) 个区间")
+                
+                // 保留用户手动修改的标签
+                var customLabels: [String: (label: String, contactId: String?)] = [:]
+                for seg in currentSegments {
+                    if !seg.speakerLabel.isEmpty && !seg.speakerLabel.hasPrefix("Speaker_") {
+                        customLabels[seg.id] = (seg.speakerLabel, seg.contactId)
+                    }
+                }
+                
+                var aligned = self.alignSpeakerLabels(transcripts: currentSegments, diarization: diarOutput.segments)
+                
+                // 恢复手动标签
+                if !customLabels.isEmpty {
+                    aligned = aligned.map { seg in
+                        var s = seg
+                        if let saved = customLabels[seg.id] {
+                            s.speakerLabel = saved.label
+                            s.contactId = saved.contactId
+                        }
+                        return s
+                    }
+                }
+                
+                // 声纹匹配
+                let allContacts = self.databaseManager.fetchAllContacts()
+                let knownContacts = self.databaseManager.fetchContactsWithEmbeddings()
+                AppLog.info("声纹匹配: 已知联系人=\(allContacts.count)")
+                var matchedSpeakerIds = Set<String>()
+                if !knownContacts.isEmpty {
+                    let matches = DiarizationService.matchSpeakers(
+                        newEmbeddings: diarOutput.speakerEmbeddings,
+                        knownContacts: knownContacts
+                    )
+                    let highScoreMatches = matches.filter { $0.value.score > 0.7 }
+                    let matchedNames = highScoreMatches.map { $0.value.contactName }.joined(separator: ", ")
+                    AppLog.info("声纹匹配结果: \(highScoreMatches.count) 个高置信度匹配 \(matchedNames)")
+                    for (speakerId, match) in matches where match.score > 0.7 {
+                        matchedSpeakerIds.insert(speakerId)
+                        self.addAttendee(match.contactName)
+                        try? self.databaseManager.saveContactEmbedding(
+                            contactId: match.contactId,
+                            embedding: diarOutput.speakerEmbeddings[speakerId] ?? []
+                        )
+                    }
+                    var autoMap: [String: (name: String, contactId: String)] = [:]
+                    for (speakerId, match) in matches where match.score > 0.7 {
+                        autoMap[speakerId] = (name: match.contactName, contactId: match.contactId)
+                    }
+                    if !autoMap.isEmpty {
+                        aligned = aligned.map { seg in
+                            var s = seg
+                            if let match = autoMap[seg.speakerLabel] {
+                                s.speakerLabel = match.name
+                                s.contactId = match.contactId
+                            }
+                            return s
+                        }
+                    }
+                }
+                
+                // 未匹配的临时 Speaker 转正（确实无法对照已有联系人的才创建）
+                let remainingLabels = Set(aligned.map(\.speakerLabel)).filter { $0.hasPrefix("Speaker_") && !matchedSpeakerIds.contains($0) }
+                for label in remainingLabels {
+                    self.addAttendee(label)
+                }
+                
+                self.transcriptSegments = aligned
+                self.segmentCount = aligned.count
+                self.saveSegmentsToDatabase(meetingId: meetingId)
+                self.isTranscribingOffline = false
+                try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .completed)
+            }
+        }
+    }
 
     private func runOfflineTranscription(for meetingId: String, audioURL: URL) {
-        let log = { (msg: String) in
-            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-            let line = "\(df.string(from: Date())) [VM] \(msg)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            } else { try? line.write(toFile: "/tmp/auranote_diag.log", atomically: true, encoding: .utf8) }
-        }
-
         transcriptionTask?.cancel()
-        log("转写任务启动: \(meetingId)")
 
+        AppLog.info("离线转写+分离开始: meeting=\(meetingId)")
         try? databaseManager.updateMeetingStatus(id: meetingId, status: .processingLlm)
         isTranscribingOffline = true
 
@@ -233,6 +330,8 @@ final class RecordingViewModel {
         sharedSpeakerMap.initialize(to: nil)
         let sharedEmbeddings = UnsafeMutablePointer<[String: [Float]]?>.allocate(capacity: 1)
         sharedEmbeddings.initialize(to: nil)
+        let sharedMatchedSpeakerIds = UnsafeMutablePointer<Set<String>>.allocate(capacity: 1)
+        sharedMatchedSpeakerIds.initialize(to: Set())
 
         // 前台消费者：每 0.3s 批量读取，如有声纹分离结果则即时对齐
         let consumerTask = Task { @MainActor [weak self] in
@@ -269,7 +368,7 @@ final class RecordingViewModel {
                             }
                         }
                         if let autoMap = sharedSpeakerMap.pointee, !autoMap.isEmpty {
-                            finalAligned = aligned.map { seg in
+                            finalAligned = finalAligned.map { seg in
                                 var s = seg
                                 if let match = autoMap[seg.speakerLabel] {
                                     s.speakerLabel = match.name
@@ -310,7 +409,6 @@ final class RecordingViewModel {
             }
 
             do {
-                log("初始化模型...")
                 try await WhisperService.shared.initialize()
                 try Task.checkCancellation()
 
@@ -324,84 +422,117 @@ final class RecordingViewModel {
                 // 声纹分离先跑（秒级完成），结果共享给消费者即时对齐
                 _ = Task {
                     if let diarOutput = try? await DiarizationService.shared.diarizeWithEmbeddings(audioURL: audioURL) {
+                        let speakerCount = Set(diarOutput.segments.map(\.speakerId)).count
+                        AppLog.info("声纹分离完成: \(speakerCount) 说话人, \(diarOutput.segments.count) 区间")
                         sharedDiar.pointee = diarOutput.segments
                         sharedEmbeddings.pointee = diarOutput.speakerEmbeddings
                         self.lastDiarEmbeddings = diarOutput.speakerEmbeddings
                         // 立即保存声纹向量到数据库（防止重启丢失）
                         try? self.databaseManager.saveMeetingEmbeddings(meetingId: meetingId, embeddings: diarOutput.speakerEmbeddings)
-                        log("声纹分离完毕: \(diarOutput.segments.count) 区间, 向量: \(diarOutput.speakerEmbeddings.count)个, 已存DB")
 
                         // 声纹匹配：与已知联系人比对
+                        let allContacts = self.databaseManager.fetchAllContacts()
                         let knownContacts = self.databaseManager.fetchContactsWithEmbeddings()
+                        AppLog.info("声纹匹配: 已知联系人=\(allContacts.count)")
+                        var matchedSpeakerIds = Set<String>()
                         if !knownContacts.isEmpty {
                             let matches = DiarizationService.matchSpeakers(
                                 newEmbeddings: diarOutput.speakerEmbeddings,
                                 knownContacts: knownContacts
                             )
-                            // 详细打印每个 speaker 的匹配结果
-                            for (speakerId, _) in diarOutput.speakerEmbeddings {
-                                var bestScore: Float = -1
-                                var bestName = ""
-                                for contact in knownContacts {
-                                    let score = DiarizationService.cosineSimilarity(
-                                        diarOutput.speakerEmbeddings[speakerId] ?? [],
-                                        contact.embedding
-                                    )
-                                    if score > bestScore { bestScore = score; bestName = contact.name }
-                                }
-                                if bestScore > 0.7 {
-                                    log("声纹匹配: \(speakerId)→\(bestName) (置信度:\(String(format:"%.2f",bestScore)))")
-                                } else {
-                                    log("声纹未匹配: \(speakerId) vs \(knownContacts.map{ $0.name }.joined(separator:",")) 最高分=\(String(format:"%.2f",bestScore))")
-                                }
-                            }
 
+                            let highScore = matches.filter { $0.value.score > 0.7 }
+                            let matchedNames = highScore.map { $0.value.contactName }.joined(separator: ", ")
+                            AppLog.info("声纹匹配结果: \(highScore.count) 个高置信度匹配 \(matchedNames)")
                             var autoMap: [String: (name: String, contactId: String)] = [:]
                             for (speakerId, match) in matches where match.score > 0.7 {
+                                matchedSpeakerIds.insert(speakerId)
                                 autoMap[speakerId] = (name: match.contactName, contactId: match.contactId)
                                 try? self.databaseManager.saveContactEmbedding(contactId: match.contactId, embedding: diarOutput.speakerEmbeddings[speakerId] ?? [])
                             }
                             if !autoMap.isEmpty { sharedSpeakerMap.pointee = autoMap }
-                        } else {
-                            log("声纹匹配跳过: 无已知联系人向量")
                         }
+                        // 未匹配的临时 Speaker 后续转正
+                        sharedMatchedSpeakerIds.pointee = matchedSpeakerIds
                     }
                 }
 
-                log("正在并行执行转写+声纹分离...")
                 let offlineSegments = try await whisperTask
                 try Task.checkCancellation()
-                log("Whisper转写完毕: \(offlineSegments.count) 段")
 
-                // 关闭消费者，最终落库
+                // 等待消费者处理完回调发出的最后一批段
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                // 关闭消费者
                 consumerTask.cancel()
-                // 确保最终对齐（兜底）
+
+                // 以 offlineSegments（完整转写结果）为最终基准，对齐声纹分离
+                var finalSegments: [TranscriptSegment]
                 if let diar = sharedDiar.pointee, !diar.isEmpty {
-                    _ = await self.alignSpeakerLabels(transcripts: offlineSegments, diarization: diar)
+                    finalSegments = await self.alignSpeakerLabels(transcripts: offlineSegments, diarization: diar)
+                } else {
+                    finalSegments = offlineSegments
+                }
+
+                // 恢复用户手动修改过的标签（从消费者已处理的段中提取）
+                let currentSegs = await MainActor.run { self.transcriptSegments }
+                var customLabels: [String: (label: String, contactId: String?)] = [:]
+                for seg in currentSegs {
+                    if !seg.speakerLabel.isEmpty, !seg.speakerLabel.hasPrefix("Speaker_") {
+                        customLabels[seg.id] = (seg.speakerLabel, seg.contactId)
+                    }
+                }
+                if !customLabels.isEmpty {
+                    finalSegments = finalSegments.map { seg in
+                        var s = seg
+                        if let saved = customLabels[seg.id] {
+                            s.speakerLabel = saved.label
+                            s.contactId = saved.contactId
+                        }
+                        return s
+                    }
+                }
+
+                // 应用声纹匹配映射
+                if let autoMap = sharedSpeakerMap.pointee, !autoMap.isEmpty {
+                    finalSegments = finalSegments.map { seg in
+                        var s = seg
+                        if let match = autoMap[seg.speakerLabel] {
+                            s.speakerLabel = match.name
+                            s.contactId = match.contactId
+                        }
+                        return s
+                    }
                 }
 
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
-                    self.segmentCount = self.transcriptSegments.count
+                    self.transcriptSegments = finalSegments
+                    self.segmentCount = finalSegments.count
                     self.saveSegmentsToDatabase(meetingId: meetingId)
                     try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .completed)
+                    AppLog.info("离线转写+分离完成: \(finalSegments.count) 段")
+                    // 未匹配的临时 Speaker 转正
+                    let matchedIds = sharedMatchedSpeakerIds.pointee
+                    let remainingLabels = Set(finalSegments.map(\.speakerLabel)).filter { $0.hasPrefix("Speaker_") && !matchedIds.contains($0) }
+                    for label in remainingLabels {
+                        self.addAttendee(label)
+                    }
                     // 兜底：为所有已映射到联系人的 segment 保存声纹向量
                     if let embeddings = sharedEmbeddings.pointee, !embeddings.isEmpty {
-                        for seg in self.transcriptSegments {
+                        for seg in finalSegments {
                             if let cid = seg.contactId, let emb = embeddings[seg.speakerLabel] ?? embeddings.first(where: { $0.key.contains(seg.speakerLabel) })?.value {
                                 try? self.databaseManager.saveContactEmbedding(contactId: cid, embedding: emb)
                             }
                         }
                     }
-                    log("全部完成: meetingId=\(meetingId) status=completed")
                 }
             } catch is CancellationError {
-                log("转写被用户中断")
+                AppLog.warn("离线转写被取消: meeting=\(meetingId)")
                 await MainActor.run {
                     try? self.databaseManager.updateMeetingStatus(id: meetingId, status: .pendingDiarization)
                 }
             } catch {
-                log("转写失败: \(error.localizedDescription)")
+                AppLog.error("离线转写失败: \(error.localizedDescription)")
                 await MainActor.run {
                     self.errorAlert = "\(loc("err_offline_transcribe_failed"))\n\n\(error.localizedDescription)"
                     self.saveSegmentsToDatabase(meetingId: meetingId)
@@ -413,66 +544,66 @@ final class RecordingViewModel {
 
     func importAudioFile(from sourceURL: URL, title: String? = nil, location: String? = nil) async {
         let meetingId = UUID().uuidString
-            let ext = sourceURL.pathExtension.lowercased()
-            let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
-            guard allowedExts.contains(ext) else {
-                errorAlert = "\(loc("err_unsupported_audio_format")): .\(ext)"
-                return
-            }
+        let ext = sourceURL.pathExtension.lowercased()
+        let allowedExts = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "caf"]
+        guard allowedExts.contains(ext) else {
+            errorAlert = "\(loc("err_unsupported_audio_format")): .\(ext)"
+            return
+        }
 
-            let destDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            let destURL = destDir.appendingPathComponent("audio_\(meetingId).\(ext)")
+        let destDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let destURL = destDir.appendingPathComponent("audio_\(meetingId).\(ext)")
 
-            do {
-                try FileManager.default.copyItem(at: sourceURL, to: destURL)
-            } catch {
-                errorAlert = "\(loc("err_file_copy_failed")): \(error.localizedDescription)"
-                return
-            }
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        } catch {
+            errorAlert = "\(loc("err_file_copy_failed")): \(error.localizedDescription)"
+            return
+        }
 
-            // 探测音频实际时长
-            var audioDuration = 0
-            if let player = try? AVAudioPlayer(contentsOf: destURL) {
-                audioDuration = Int(player.duration)
-            }
+        // 探测音频实际时长
+        var audioDuration = 0
+        if let player = try? AVAudioPlayer(contentsOf: destURL) {
+            audioDuration = Int(player.duration)
+        }
 
-            let fileName = sourceURL.lastPathComponent
-            let meetingTitle = title ?? fileName.replacingOccurrences(
-                of: ".\(ext)", with: "",
-                options: .caseInsensitive
-            )
+        let fileName = sourceURL.lastPathComponent
+        let meetingTitle = title ?? fileName.replacingOccurrences(
+            of: ".\(ext)", with: "",
+            options: .caseInsensitive
+        )
 
-            var parentId: String? = nil
-            if shouldExtendLastMeeting {
-                parentId = selectedParentMeetingId
-            }
+        var parentId: String? = nil
+        if shouldExtendLastMeeting {
+            parentId = selectedParentMeetingId
+        }
 
-            let meeting = Meeting(
-                id: meetingId,
-                parentMeetingId: parentId,
-                title: meetingTitle,
-                location: location ?? "外部导入",
-                audioPath: destURL.path,
-                duration: audioDuration,
-                status: .pendingDiarization,
-                summary: nil,
-                createdAt: formCreatedAt,
-                updatedAt: formCreatedAt
-            )
+        let meeting = Meeting(
+            id: meetingId,
+            parentMeetingId: parentId,
+            title: meetingTitle,
+            location: location ?? loc("external_import"),
+            audioPath: destURL.path,
+            duration: audioDuration,
+            status: .pendingDiarization,
+            summary: nil,
+            createdAt: formCreatedAt,
+            updatedAt: formCreatedAt
+        )
 
-            do {
-                try databaseManager.createMeeting(meeting)
-            } catch {
-                errorAlert = "\(loc("err_create_meeting_failed")): \(error.localizedDescription)"
-                try? FileManager.default.removeItem(at: destURL)
-                return
-            }
+        do {
+            try databaseManager.createMeeting(meeting)
+        } catch {
+            errorAlert = "\(loc("err_create_meeting_failed")): \(error.localizedDescription)"
+            try? FileManager.default.removeItem(at: destURL)
+            return
+        }
 
-            currentMeeting = meeting
-            audioPlayer.duration = TimeInterval(audioDuration)
-            audioPlayer.currentTime = 0
-            transcriptSegments = []
-            segmentCount = 0
+        currentMeeting = meeting
+        audioPlayer.duration = TimeInterval(audioDuration)
+        audioPlayer.currentTime = 0
+        transcriptSegments = []
+        segmentCount = 0
         meetingStatus = .reviewing
 
         runOfflineTranscription(for: meetingId, audioURL: destURL)
@@ -505,7 +636,6 @@ final class RecordingViewModel {
                 attendees: newList
             )
         } catch {
-            print("[VM] addAttendee DB FAILED: \(error)")
         }
     }
 
@@ -517,24 +647,12 @@ final class RecordingViewModel {
             embeddings = databaseManager.fetchMeetingEmbeddings(meetingId: meetingId)
         }
         guard !embeddings.isEmpty else {
-            let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding SKIP: no embeddings for \(speakerLabel)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            }
             return
         }
         if let emb = embeddings[speakerLabel] {
             try? databaseManager.saveContactEmbedding(contactId: contactId, embedding: emb)
-            let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding OK: \(speakerLabel) → \(emb.count)维\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            }
-        } else if let (key, emb) = embeddings.first {
+        } else if let (_, emb) = embeddings.first {
             try? databaseManager.saveContactEmbedding(contactId: contactId, embedding: emb)
-            let line = "\(Date().formatted(.iso8601)) [VM] saveEmbedding via \(key): \(emb.count)维\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            }
         }
     }
 
@@ -559,7 +677,6 @@ final class RecordingViewModel {
             )
             currentMeeting = meeting
         } catch {
-            print("[RecordingViewModel] Failed to update meeting metadata: \(error)")
         }
     }
     
@@ -601,7 +718,6 @@ final class RecordingViewModel {
                 try databaseManager.saveSpeechClip(clip)
             }
         } catch {
-            print("[RecordingViewModel] ERROR: Failed to save segments to database: \(error)")
         }
     }
 
@@ -700,7 +816,6 @@ final class RecordingViewModel {
             do {
                 try databaseManager.splitSpeechClip(oldClipId: original.id, newClip1: clip1, newClip2: clip2)
             } catch {
-                print("[RecordingViewModel] ERROR: Failed to split segment in db: \(error)")
             }
         }
     }
@@ -717,22 +832,13 @@ final class RecordingViewModel {
     /// 全局重命名说话人（并同步更新所有相关片段）
     func globalRenameSpeaker(oldName: String, newName: String, contactId: String? = nil) {
         guard oldName != newName else { return }
-        let log = { (msg: String) in
-            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-            let line = "\(df.string(from: Date())) [Rename] \(msg)\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            }
-        }
         var cid = contactId
         if cid == nil, let contact = databaseManager.fetchContact(byName: newName) {
             cid = contact.id
-            log("找到已有联系人: \(oldName)→\(newName), contactId=\(contact.id)")
         } else if cid == nil {
             let contact = Contact.create(name: newName)
             try? databaseManager.saveContact(contact)
             cid = contact.id
-            log("新建联系人: \(oldName)→\(newName), contactId=\(contact.id)")
         }
         for i in 0..<transcriptSegments.count {
             if transcriptSegments[i].speakerLabel == oldName {
@@ -758,7 +864,6 @@ final class RecordingViewModel {
                 do {
                     try databaseManager.saveContact(contact!)
                 } catch {
-                    print("[RecordingViewModel] ERROR saving contact: \(error)")
                 }
             }
             
@@ -786,11 +891,6 @@ final class RecordingViewModel {
             saveSegmentsToDatabase(meetingId: meeting.id)
             // 保存实际音频时长到数据库
             let actualDuration = Int(audioPlayer.duration)
-            let df = DateFormatter(); df.dateFormat = "HH:mm:ss.SSS"
-            let line = "\(df.string(from: Date())) [Duration] finishReview: meetingId=\(meeting.id), DB旧时长=\(meeting.duration)s, audioPlayer时长=\(actualDuration)s\n"
-            if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-                h.seekToEndOfFile(); h.write(d); h.closeFile()
-            }
             if actualDuration > 0 && actualDuration != meeting.duration {
                 try? databaseManager.updateMeetingInfo(
                     id: meeting.id,
@@ -848,12 +948,6 @@ final class RecordingViewModel {
         let dMin = diarization.map(\.startTime).min() ?? 0
         let dMax = diarization.map(\.endTime).max() ?? 0
         let dSpeakers = Set(diarization.map(\.speakerId)).sorted().joined(separator: ", ")
-        let logMsg = "对齐开始: Whisper时段[\(String(format:"%.0f",wMin))-\(String(format:"%.0f",wMax))s,\(transcripts.count)段] vs Diar时段[\(String(format:"%.0f",dMin))-\(String(format:"%.0f",dMax))s,\(diarization.count)段, speakers=\(dSpeakers)]"
-        let dfh = DateFormatter(); dfh.dateFormat = "HH:mm:ss.SSS"
-        let line = "\(dfh.string(from: Date())) [Align] \(logMsg)\n"
-        if let d = line.data(using: .utf8), let h = FileHandle(forWritingAtPath: "/tmp/auranote_diag.log") {
-            h.seekToEndOfFile(); h.write(d); h.closeFile()
-        }
         var results = transcripts
         
         for i in 0..<results.count {
