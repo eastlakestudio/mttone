@@ -568,6 +568,20 @@ final class DatabaseManager {
         }
     }
 
+    func updateSpeechClipText(clipId: String, text: String) throws {
+        let sql = "UPDATE speech_clips SET original_text = ? WHERE id = ?"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw DBError.prepareFailed(lastError)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, text.cString, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(stmt, 2, clipId.cString, -1, SQLITE_TRANSIENT)
+        guard sqlite3_step(stmt) == SQLITE_DONE else {
+            throw DBError.executeFailed(lastError)
+        }
+    }
+
     func fetchSpeechClipsGroupedByMeeting(forContact contactId: String) -> [(meeting: Meeting, clips: [SpeechClip])] {
         let clipsSQL = """
         SELECT sc.id, sc.meeting_id, sc.speaker_label, sc.contact_id, sc.start_time, sc.end_time, 

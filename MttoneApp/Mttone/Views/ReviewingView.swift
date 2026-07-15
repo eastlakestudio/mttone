@@ -20,6 +20,15 @@ struct ReviewingView: View {
     @State private var activeSegmentDebounceTask: Task<Void, Never>?
     @State private var pendingActiveSegmentId: String?
     @State private var playingSegmentId: String?
+    @State private var scrollToId: String?
+    @State private var flashSegmentId: String?
+
+    // 搜索
+    @State private var showSearch = false
+    @State private var searchText = ""
+    @State private var searchResults: [TranscriptSegment] = []
+    @State private var searchIndex = 0
+    @FocusState private var isSearchFocused: Bool
 
     private var diarizationProgress: (separated: Int, total: Int)? {
         guard let meeting = viewModel.currentMeeting, meeting.duration > 0 else { return nil }
@@ -263,6 +272,20 @@ struct ReviewingView: View {
                     }
                     .frame(width: 32)
                     .help(loc("meeting_inspector"))
+
+                    Button {
+                        withAnimation { showSearch.toggle() }
+                        if showSearch {
+                            isSearchFocused = true
+                        } else {
+                            searchText = ""; searchResults = []
+                        }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(showSearch ? .purple : .secondary)
+                    }
+                    .frame(width: 32)
+                    .help("搜索")
                 }
             }
             .onAppear {
@@ -404,19 +427,131 @@ struct ReviewingView: View {
     }
 
     private var transcriptList: some View {
-        UnifiedTranscriptEditor(
-            segments: $viewModel.transcriptSegments,
-            filterSpeaker: $filterSpeaker,
-            activeSegmentId: $activeSegmentId,
-            meetingAttendees: $attendeesString,
-            contacts: databaseManager.fetchAllContacts().map { $0.name },
-            onPlaySegment: { seg in playSegment(seg) },
-            onSpeakerChanged: { segId, newSpeaker in
-                    viewModel.updateSpeakerLabel(id: segId, newLabel: newSpeaker)
-                    addAttendeeFromLabel(newSpeaker)
+        ZStack(alignment: .topTrailing) {
+            UnifiedTranscriptEditor(
+                segments: $viewModel.transcriptSegments,
+                filterSpeaker: $filterSpeaker,
+                activeSegmentId: $activeSegmentId,
+                meetingAttendees: $attendeesString,
+                scrollToId: $scrollToId,
+                searchQuery: searchText,
+                flashSegmentId: flashSegmentId,
+                onFlashDone: { flashSegmentId = nil },
+                contacts: databaseManager.fetchAllContacts().map { $0.name },
+                onPlaySegment: { seg in playSegment(seg) },
+                onSpeakerChanged: { segId, newSpeaker in
+                        // 仅更改当前这一句的发言人，不影响其他段
+                        if let idx = viewModel.transcriptSegments.firstIndex(where: { $0.id == segId }) {
+                            let oldLabel = viewModel.transcriptSegments[idx].speakerLabel
+                            var contact = databaseManager.fetchContact(byName: newSpeaker)
+                            if contact == nil {
+                                contact = Contact.create(name: newSpeaker)
+                                try? databaseManager.saveContact(contact!)
+                            }
+                            viewModel.transcriptSegments[idx].speakerLabel = newSpeaker
+                            viewModel.transcriptSegments[idx].contactId = contact?.id
+                            try? databaseManager.updateSpeechClipContact(
+                                clipId: segId, speakerLabel: newSpeaker, contactId: contact?.id
+                            )
+                            if let cid = contact?.id {
+                                viewModel.saveEmbeddingForSpeaker(speakerLabel: oldLabel, contactId: cid)
+                            }
+                        }
+                        addAttendeeFromLabel(newSpeaker)
+                },
+                onTextChanged: { segId, newText in
+                    try? databaseManager.updateSpeechClipText(clipId: segId, text: newText)
+                }
+            )
+
+            // 浮动搜索栏
+            if showSearch {
+                searchBar
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
-        )
+        }
         .padding()
+    }
+
+    // MARK: - 搜索
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("搜索文本…", text: $searchText)
+                .textFieldStyle(.plain)
+                .frame(width: 160)
+                .focused($isSearchFocused)
+                .onChange(of: searchText) { _, q in
+                    performSearch(q)
+                }
+                .onSubmit { navigateSearch(1) }
+
+            if !searchResults.isEmpty {
+                Text("\(searchIndex + 1)/\(searchResults.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+
+                Button {
+                    navigateSearch(-1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.plain)
+                .disabled(searchResults.count <= 1)
+
+                Button {
+                    navigateSearch(1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .disabled(searchResults.count <= 1)
+            }
+
+            Button {
+                showSearch = false
+                searchText = ""
+                searchResults = []
+                isSearchFocused = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+    }
+
+    private func performSearch(_ query: String) {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else {
+            searchResults = []
+            searchIndex = 0
+            return
+        }
+        searchResults = viewModel.transcriptSegments
+            .filter { $0.isFinal && $0.text.lowercased().contains(q) }
+        searchIndex = 0
+        if let first = searchResults.first {
+            scrollToId = first.id
+        }
+    }
+
+    private func navigateSearch(_ delta: Int) {
+        guard !searchResults.isEmpty else { return }
+        searchIndex = (searchIndex + delta + searchResults.count) % searchResults.count
+        let seg = searchResults[searchIndex]
+        scrollToId = seg.id
+        flashSegmentId = seg.id
     }
 
     // MARK: - 会议信息卡片
@@ -446,74 +581,61 @@ struct ReviewingView: View {
     // MARK: - 音频播放
 
     private var playbackControlPanel: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Text(formatTime(viewModel.audioPlayer.currentTime))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-
-                Slider(value: Binding(
-                    get: { viewModel.audioPlayer.currentTime },
-                    set: { viewModel.audioPlayer.seek(to: $0) }
-                ), in: 0...max(viewModel.audioPlayer.duration, 1.0))
-                .tint(.purple)
-
-                Text(formatTime(viewModel.audioPlayer.duration))
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 20) {
-                Button {
-                    if viewModel.audioPlayer.isPlaying {
-                        viewModel.audioPlayer.pause()
-                    } else {
-                        if let meeting = viewModel.currentMeeting {
-                            let url = meeting.localAudioURL
-                            if viewModel.audioPlayer.currentTime >= viewModel.audioPlayer.duration - 0.1 || !viewModel.audioPlayer.hasPlayer {
-                                viewModel.audioPlayer.startPlaying(url: url)
-                            } else {
-                                viewModel.audioPlayer.resume()
-                            }
+        HStack(spacing: 8) {
+            Button {
+                if viewModel.audioPlayer.isPlaying {
+                    viewModel.audioPlayer.pause()
+                } else {
+                    if let meeting = viewModel.currentMeeting {
+                        let url = meeting.localAudioURL
+                        if viewModel.audioPlayer.currentTime >= viewModel.audioPlayer.duration - 0.1 || !viewModel.audioPlayer.hasPlayer {
+                            viewModel.audioPlayer.startPlaying(url: url)
+                        } else {
+                            viewModel.audioPlayer.resume()
                         }
                     }
-                } label: {
-                    Image(systemName: viewModel.audioPlayer.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Color.purple, in: Circle())
                 }
-                .buttonStyle(.plain)
+            } label: {
+                Image(systemName: viewModel.audioPlayer.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title3)
+                    .foregroundStyle(.purple)
+            }
+            .buttonStyle(.plain)
 
-                HStack(spacing: 4) {
-                    ForEach(0..<8) { _ in
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(viewModel.audioPlayer.isPlaying ? Color.purple : Color.gray.opacity(0.3))
-                            .frame(width: 3, height: CGFloat.random(in: 4...20) * CGFloat(viewModel.audioPlayer.meterLevel))
-                    }
-                }
-                .frame(width: 40, height: 24)
+            Text(formatTime(viewModel.audioPlayer.currentTime))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .leading)
 
-                Spacer()
+            Slider(value: Binding(
+                get: { viewModel.audioPlayer.currentTime },
+                set: { viewModel.audioPlayer.seek(to: $0) }
+            ), in: 0...max(viewModel.audioPlayer.duration, 1.0))
+            .tint(.purple)
 
-                HStack(spacing: 8) {
-                    Image(systemName: viewModel.audioPlayer.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .foregroundStyle(.secondary)
-                    Slider(value: Binding(
-                        get: { viewModel.audioPlayer.volume },
-                        set: { viewModel.audioPlayer.volume = $0 }
-                    ), in: 0...1.0)
-                    .frame(width: 100)
-                    .tint(.secondary)
-                }
+            Text(formatTime(viewModel.audioPlayer.duration))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .trailing)
+
+            HStack(spacing: 4) {
+                Image(systemName: viewModel.audioPlayer.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Slider(value: Binding(
+                    get: { viewModel.audioPlayer.volume },
+                    set: { viewModel.audioPlayer.volume = $0 }
+                ), in: 0...1.0)
+                .frame(width: 80)
+                .tint(.secondary)
             }
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(Color.gray.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.top, 6)
     }
 
     // MARK: - 辅助

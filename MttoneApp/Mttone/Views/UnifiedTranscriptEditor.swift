@@ -13,9 +13,14 @@ struct UnifiedTranscriptEditor: View {
     @Binding var filterSpeaker: String?
     @Binding var activeSegmentId: String?
     @Binding var meetingAttendees: String
+    @Binding var scrollToId: String?
+    var searchQuery: String = ""
+    var flashSegmentId: String? = nil
+    var onFlashDone: (() -> Void)? = nil
     var contacts: [String] = []
     var onPlaySegment: ((TranscriptSegment) -> Void)?
     var onSpeakerChanged: ((String, String) -> Void)?
+    var onTextChanged: ((String, String) -> Void)?
 
     @State private var segmentFrames: [String: CGRect] = [:]
     @State private var scrollViewHeight: CGFloat = 0
@@ -68,12 +73,15 @@ struct UnifiedTranscriptEditor: View {
                                 segment: seg,
                                 isFirst: displayedIdx == 0,
                                 isActive: seg.id == activeSegmentId,
+                                searchQuery: searchQuery,
+                                flashSegmentId: flashSegmentId,
                                 existingSpeakers: allSpeakers.filter { $0 != seg.speakerLabel },
                                 attendees: attendeeList,
                                 speakerColor: colorForSpeaker(seg.speakerLabel),
                                 onTextChange: { newText in
                                     if let si = segments.firstIndex(where: { $0.id == seg.id }) {
                                         segments[si].text = newText
+                                        onTextChanged?(seg.id, newText)
                                     }
                                 },
                                 onSpeakerChange: { newSpeaker in
@@ -89,7 +97,8 @@ struct UnifiedTranscriptEditor: View {
                                         splitAfter(si, text: textAfter)
                                     }
                                 },
-                                onPlay: { onPlaySegment?(seg) }
+                                onPlay: { onPlaySegment?(seg) },
+                                onFlashDone: { onFlashDone?() }
                             )
                             .id(seg.id)
                             .background(
@@ -141,6 +150,15 @@ struct UnifiedTranscriptEditor: View {
                         }
                     }
                 }
+                .onChange(of: scrollToId) { _, targetId in
+                    guard let id = targetId else { return }
+                    // 搜索定位：立即滚动到目标段
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        proxy.scrollTo(id, anchor: .top)
+                    }
+                    // 滚动完成后清除，避免重复触发
+                    DispatchQueue.main.async { scrollToId = nil }
+                }
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -175,6 +193,8 @@ struct TranscriptRow: View {
     let segment: TranscriptSegment
     let isFirst: Bool
     let isActive: Bool
+    let searchQuery: String
+    let flashSegmentId: String?
     let existingSpeakers: [String]
     let attendees: [String]
     let speakerColor: Color
@@ -183,6 +203,7 @@ struct TranscriptRow: View {
     var onMergeUp: () -> Void
     var onSplitAfter: (String) -> Void
     var onPlay: (() -> Void)?
+    var onFlashDone: (() -> Void)?
 
     @State private var editText: String
     @State private var showRenamePopover = false
@@ -190,12 +211,25 @@ struct TranscriptRow: View {
     @State private var skipNextNewlineCheck = false
     @State private var isHovered = false
     @State private var textEditorHeight: CGFloat = 44
+    @State private var flashOpacity: Double = 0
 
-    init(segment: TranscriptSegment, isFirst: Bool, isActive: Bool, existingSpeakers: [String], attendees: [String], speakerColor: Color, onTextChange: @escaping (String) -> Void, onSpeakerChange: @escaping (String) -> Void, onMergeUp: @escaping () -> Void, onSplitAfter: @escaping (String) -> Void, onPlay: (() -> Void)? = nil) {
+    private var isSearchMatch: Bool {
+        guard !searchQuery.isEmpty else { return false }
+        return segment.text.lowercased().contains(searchQuery.lowercased())
+    }
+
+    private var isFlashTarget: Bool {
+        guard let fid = flashSegmentId else { return false }
+        return segment.id == fid
+    }
+
+    init(segment: TranscriptSegment, isFirst: Bool, isActive: Bool, searchQuery: String = "", flashSegmentId: String? = nil, existingSpeakers: [String], attendees: [String], speakerColor: Color, onTextChange: @escaping (String) -> Void, onSpeakerChange: @escaping (String) -> Void, onMergeUp: @escaping () -> Void, onSplitAfter: @escaping (String) -> Void, onPlay: (() -> Void)? = nil, onFlashDone: (() -> Void)? = nil) {
         self.segment = segment; self.isFirst = isFirst; self.isActive = isActive
+        self.searchQuery = searchQuery; self.flashSegmentId = flashSegmentId
         self.existingSpeakers = existingSpeakers; self.attendees = attendees; self.speakerColor = speakerColor
         self.onTextChange = onTextChange; self.onSpeakerChange = onSpeakerChange
         self.onMergeUp = onMergeUp; self.onSplitAfter = onSplitAfter; self.onPlay = onPlay
+        self.onFlashDone = onFlashDone
         self._editText = State(initialValue: segment.text)
     }
     var body: some View {
@@ -261,25 +295,34 @@ struct TranscriptRow: View {
             HStack(alignment: .top, spacing: 0) {
                 Spacer().frame(width: 22)  // ▶ 按钮宽度
                 Spacer().frame(width: 42)  // 时间戳宽度
-                TextEditor(text: $editText)
-                    .font(.body)
-                    .lineSpacing(6)
-                    .scrollContentBackground(.hidden)
-                    .scrollIndicators(.never)
-                    .frame(minHeight: 22, idealHeight: textEditorHeight, maxHeight: textEditorHeight)
-                .onChange(of: editText) { _, newValue in
-                    recalcEditorHeight(newValue)
-                    if skipNextNewlineCheck { skipNextNewlineCheck = false; return }
-                    if newValue.contains("\n") {
-                        let parts = newValue.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
-                        editText = parts[safe: 0] ?? ""
-                        onSplitAfter(parts[safe: 1] ?? "")
-                    } else { onTextChange(newValue) }
+                if isSearchMatch && !searchQuery.isEmpty {
+                    highlightedTextView
+                } else {
+                    TextEditor(text: $editText)
+                        .font(.body)
+                        .lineSpacing(6)
+                        .scrollContentBackground(.hidden)
+                        .scrollIndicators(.never)
+                        .frame(minHeight: 22, idealHeight: textEditorHeight, maxHeight: textEditorHeight)
+                    .onChange(of: editText) { _, newValue in
+                        recalcEditorHeight(newValue)
+                        if skipNextNewlineCheck { skipNextNewlineCheck = false; return }
+                        if newValue.contains("\n") {
+                            let parts = newValue.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                            editText = parts[safe: 0] ?? ""
+                            onSplitAfter(parts[safe: 1] ?? "")
+                        } else { onTextChange(newValue) }
+                    }
                 }
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(isActive ? Color.purple.opacity(0.12) : isHovered ? Color.blue.opacity(0.06) : Color.clear)
+        .background(
+            isActive ? Color.purple.opacity(0.12) :
+            flashOpacity > 0 ? Color.yellow.opacity(flashOpacity) :
+            isSearchMatch ? Color.purple.opacity(0.10) :
+            isHovered ? Color.blue.opacity(0.06) : Color.clear
+        )
         .overlay(alignment: .leading) {
             Group {
                 if isActive { Rectangle().fill(Color.purple.opacity(0.3)).frame(width: 3) }
@@ -288,10 +331,27 @@ struct TranscriptRow: View {
         }
         .onHover { h in withAnimation(.easeInOut(duration: 0.1)) { isHovered = h } }
         .onChange(of: segment.text) { _, newText in skipNextNewlineCheck = newText != editText; editText = newText }
+        .onChange(of: flashSegmentId) { _, newId in
+            if newId == segment.id { triggerFlash() }
+        }
         .onAppear { recalcEditorHeight(editText) }
     }
     private func formatTime(_ t: Double) -> String {
         let m = Int(t)/60, s = Int(t)%60; return String(format: "%02d:%02d", m, s)
+    }
+
+    /// 搜索定位闪烁动画：黄色底色闪烁 3 次
+    private func triggerFlash() {
+        Task { @MainActor in
+            for i in 0..<6 {
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    flashOpacity = i % 2 == 0 ? 0.35 : 0
+                }
+                try? await Task.sleep(nanoseconds: 140_000_000)
+            }
+            flashOpacity = 0
+            onFlashDone?()
+        }
     }
     private func formatDuration(_ t: Double) -> String {
         if t < 1 { return "" }
@@ -323,6 +383,31 @@ struct TranscriptRow: View {
     private func confirmRename() {
         let name = newSpeakerName.trimmingCharacters(in: .whitespaces)
         if !name.isEmpty { onSpeakerChange(name); showRenamePopover = false }
+    }
+
+    /// 将文本按搜索匹配拆分为高亮/非高亮片段
+    private var highlightedAttributedText: AttributedString {
+        var result = AttributedString(editText)
+        let lower = editText.lowercased()
+        let query = searchQuery.lowercased()
+        guard !query.isEmpty else { return result }
+        var searchStart = lower.startIndex
+        while let range = lower[searchStart...].range(of: query) {
+            guard let start = AttributedString.Index(range.lowerBound, within: result),
+                  let end = AttributedString.Index(range.upperBound, within: result) else { break }
+            result[start..<end].backgroundColor = NSColor.yellow.withAlphaComponent(0.45)
+            result[start..<end].font = .body.bold()
+            searchStart = range.upperBound
+        }
+        return result
+    }
+
+    /// 带搜索高亮的只读文本视图
+    private var highlightedTextView: some View {
+        Text(highlightedAttributedText)
+            .font(.body)
+            .lineSpacing(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
