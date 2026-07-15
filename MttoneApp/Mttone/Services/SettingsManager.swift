@@ -24,17 +24,10 @@ final class SettingsManager {
     var selectedVoice: String = "openai/whisper-large-v3"
     var useChinaMirror: Bool = true
     
-    /// 所有支持的模型列表
-    let allVoices = ["openai/whisper-large-v3", "openai/whisper-large-v3-turbo"]
+    /// 唯一支持的模型
+    static let supportedVoice = "openai/whisper-large-v3"
     
-    /// 是否已执行过首次双模型就绪后的自动选择（仅触发一次）
-    var hasAutoSelectedModel: Bool = false {
-        didSet {
-            defaults.set(hasAutoSelectedModel, forKey: "has_auto_selected_model")
-        }
-    }
-    
-    /// 每个模型独立的下载状态
+    /// 单个模型的下载状态
     struct ModelDownloadState: Codable {
         var isDownloading = false
         var progress: Double = 0.0
@@ -71,28 +64,10 @@ final class SettingsManager {
         modelDownloadStates.first { $0.value.isDownloading }?.key ?? ""
     }
     
-    /// 任一模型已下载完成且不在下载中
-    var anyModelAvailable: Bool {
-        allVoices.contains { voice in
-            let state = downloadState(for: voice)
-            return state.isDownloaded && !state.isDownloading
-        }
-    }
-    
-    /// 所有模型均不可用（未下载或下载中）
-    var allModelsUnavailable: Bool {
-        !anyModelAvailable
-    }
-    
-    /// 首次双模型均就绪时，自动选择 large-v3（仅触发一次）
-    func checkAndAutoSelectModel() {
-        guard !hasAutoSelectedModel else { return }
-        let largeV3State = downloadState(for: "openai/whisper-large-v3")
-        let turboState = downloadState(for: "openai/whisper-large-v3-turbo")
-        if largeV3State.isDownloaded && turboState.isDownloaded {
-            selectedVoice = "openai/whisper-large-v3"
-            hasAutoSelectedModel = true
-        }
+    /// 模型是否已下载可用
+    var isModelAvailable: Bool {
+        let state = downloadState(for: Self.supportedVoice)
+        return state.isDownloaded && !state.isDownloading
     }
     
     var modelVersion = "" {
@@ -163,9 +138,8 @@ final class SettingsManager {
         summaryPromptEN = enVal
         
         langSetting = d.string(forKey: "ui_language") ?? ""
-        selectedVoice = d.string(forKey: "voice_model") ?? "openai/whisper-large-v3"
+        selectedVoice = Self.supportedVoice
         useChinaMirror = d.object(forKey: "use_china_mirror") as? Bool ?? true
-        hasAutoSelectedModel = d.bool(forKey: "has_auto_selected_model")
         
         // 先加载 modelPath，后续文件系统同步需要用到
         let savedPath = d.string(forKey: "model_path") ?? ""
@@ -175,7 +149,7 @@ final class SettingsManager {
             // 清除无效的保存路径
             if !savedPath.isEmpty { d.removeObject(forKey: "model_path") }
             // 检查默认路径是否有模型
-            let defaultModelID = selectedVoice == "openai/whisper-large-v3-turbo" ? "openai_whisper-large-v3_turbo" : selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
+            let defaultModelID = "openai_whisper-large-v3"
             let defaultModelURL = URL(fileURLWithPath: defaultModelPath).appendingPathComponent(defaultModelID)
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: defaultModelURL.path, isDirectory: &isDir), isDir.boolValue,
@@ -197,33 +171,23 @@ final class SettingsManager {
         if !hasPerformedStartupSync && !modelPath.isEmpty {
             hasPerformedStartupSync = true
             let repoPath = modelPath + "/models/argmaxinc/whisperkit-coreml"
-            for voice in allVoices {
-                let variant: String
-                if voice == "openai/whisper-large-v3-turbo" {
-                    variant = "openai_whisper-large-v3_turbo"
-                } else {
-                    variant = voice.replacingOccurrences(of: "openai/", with: "openai_")
-                }
-                let modelDir = URL(fileURLWithPath: repoPath).appendingPathComponent(variant)
-                let markerURL = modelDir.appendingPathComponent(".download_complete")
-                let fsExists = FileManager.default.fileExists(atPath: markerURL.path)
-                var state = downloadState(for: voice)
-                state.isDownloaded = fsExists
-                // 清除残留的下载中状态（App 被杀后 Task 已消失）
-                if state.isDownloading {
-                    state.isDownloading = false
-                    state.progress = 0.0
-                }
-                setDownloadState(state, for: voice)
+            let variant = "openai_whisper-large-v3"
+            let modelDir = URL(fileURLWithPath: repoPath).appendingPathComponent(variant)
+            let markerURL = modelDir.appendingPathComponent(".download_complete")
+            let fsExists = FileManager.default.fileExists(atPath: markerURL.path)
+            var state = downloadState(for: Self.supportedVoice)
+            state.isDownloaded = fsExists
+            // 清除残留的下载中状态（App 被杀后 Task 已消失）
+            if state.isDownloading {
+                state.isDownloading = false
+                state.progress = 0.0
             }
+            setDownloadState(state, for: Self.supportedVoice)
             // 同步后立即持久化
             if let encoded = try? JSONEncoder().encode(modelDownloadStates) {
                 d.set(encoded, forKey: "model_download_states")
             }
         }
-        
-        // 启动时检查是否首次双模型就绪
-        checkAndAutoSelectModel()
     }
     
     func save() {

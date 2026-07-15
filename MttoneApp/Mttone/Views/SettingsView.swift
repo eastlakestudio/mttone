@@ -400,18 +400,11 @@ let enLocale: [String: String] = [
     "audio_file_missing_diag": "Audio file %@ not found, but found related files: %@",
 ]
 
-struct VoicePreset: Identifiable { let id = UUID(); let name: String; let size: String }
-
 struct SettingsView: View {
     @State private var settings = SettingsManager.shared
     @State private var showLangPicker = false
     @State private var downloadTask: Task<Void, Never>? = nil
     @State private var downloadStateVersion = 0
-
-    private let voices = [
-        VoicePreset(name: "openai/whisper-large-v3", size: "3.0 GB"),
-        VoicePreset(name: "openai/whisper-large-v3-turbo", size: "1.9 GB")
-    ]
 
     private let labelWidth: CGFloat = 85
 
@@ -467,30 +460,14 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                         .frame(width: labelWidth, alignment: .leading)
                                     
-                                    Menu {
-                                        ForEach(sortedVoices) { v in
-                                            Button("\(v.name) (\(v.size))") {
-                                                settings.selectedVoice = v.name
-                                            }
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Text("\(settings.selectedVoice) (\(voices.first(where: { $0.name == settings.selectedVoice })?.size ?? ""))")
-                                                .font(.callout)
-                                                .foregroundStyle(.primary)
-                                            Spacer()
-                                            Image(systemName: "chevron.up.chevron.down")
-                                                .font(.system(size: 10))
-                                                .foregroundStyle(.secondary)
-                                        }
+                                    Text("openai/whisper-large-v3 (3.0 GB)")
+                                        .font(.callout)
+                                        .foregroundStyle(.primary)
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
-                                        .frame(width: 360, height: 28)
+                                        .frame(width: 360, height: 28, alignment: .leading)
                                         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
                                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 1))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .frame(width: 360, alignment: .leading)
                                     
                                     Spacer()
                                     
@@ -533,11 +510,6 @@ struct SettingsView: View {
                                                 .font(.caption)
                                                 .fontWeight(.medium)
                                                 .foregroundStyle(.blue)
-                                            if !settings.downloadingModelVoice.isEmpty && settings.downloadingModelVoice != settings.selectedVoice {
-                                                Image(systemName: "arrow.triangle.2.circlepath")
-                                                    .font(.system(size: 8))
-                                                    .foregroundStyle(.orange)
-                                            }
                                             Button {
                                                 downloadTask?.cancel()
                                                 downloadTask = nil
@@ -688,22 +660,8 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    /// 按优先级排序的模型列表：下载中 > 已下载 > 未下载
-    private var sortedVoices: [VoicePreset] {
-        voices.sorted { a, b in
-            let stateA = settings.downloadState(for: a.name)
-            let stateB = settings.downloadState(for: b.name)
-            let rankA = stateA.isDownloading ? 0 : (stateA.isDownloaded ? 1 : 2)
-            let rankB = stateB.isDownloading ? 0 : (stateB.isDownloaded ? 1 : 2)
-            return rankA < rankB
-        }
-    }
-
     private func modelID(for voice: String) -> String {
-        if voice == "openai/whisper-large-v3-turbo" {
-            return "openai_whisper-large-v3_turbo"
-        }
-        return voice.replacingOccurrences(of: "openai/", with: "openai_")
+        return "openai_whisper-large-v3"
     }
     
     /// 模型实际存储目录（modelPath 下的子路径）
@@ -813,7 +771,6 @@ struct SettingsView: View {
                         settings.setDownloadState(finalState, for: downloadingVoice)
                         settings.modelVersion = self.modelID(for: downloadingVoice)
                         settings.save()
-                        settings.checkAndAutoSelectModel()
                     }
                     return
                     
@@ -843,13 +800,9 @@ struct SettingsView: View {
     
     private func load() {
         settings.load()
-        // 进入配置页时，按优先级自动切换模型：下载中 > 已下载 > 未下载（都未下载则显示第一个）
-        if let best = sortedVoices.first {
-            settings.selectedVoice = best.name
-        }
         // 检测已下载的模型版本
         if !settings.modelPath.isEmpty {
-            let variant = modelID(for: settings.selectedVoice)
+            let variant = "openai_whisper-large-v3"
             let modelURL = URL(fileURLWithPath: modelRepoPath).appendingPathComponent(variant)
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: modelURL.path, isDirectory: &isDir), isDir.boolValue {

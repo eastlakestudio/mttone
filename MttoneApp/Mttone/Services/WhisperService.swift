@@ -18,10 +18,7 @@ actor WhisperService {
         defer { isLoading = false }
         
         let settings = SettingsManager.shared
-        var modelID = settings.selectedVoice.replacingOccurrences(of: "openai/", with: "openai_")
-        if settings.selectedVoice == "openai/whisper-large-v3-turbo" {
-            modelID = "openai_whisper-large-v3_turbo"
-        }
+        let modelID = "openai_whisper-large-v3"
         let basePath = settings.modelPath
         if basePath.isEmpty {
             throw NSError(domain: "WhisperService", code: 400,
@@ -70,8 +67,14 @@ actor WhisperService {
         AppLog.info("离线转写开始: audio=\(audioURL.lastPathComponent) lang=\(language)")
 
         // 设置段发现回调：转写过程中持续输出中间结果
+        var callbackCount = 0
         if let onSegments = onSegments {
             pipe.segmentDiscoveryCallback = { whisperSegments in
+                callbackCount += 1
+                // 每 20 次回调记录一次进度
+                if callbackCount % 20 == 0 {
+                    AppLog.info("WhisperKit segmentDiscovery 回调 #\(callbackCount): \(whisperSegments.count) 新段, 最后时间=\(whisperSegments.last?.end ?? 0)s")
+                }
                 let mapped = whisperSegments.map { seg in
                     TranscriptSegment(
                         id: "\(meetingId)_\(seg.id)",
@@ -90,17 +93,19 @@ actor WhisperService {
             task: .transcribe,
             language: language,
             temperature: 0.0,
-            temperatureFallbackCount: 0,
+            temperatureFallbackCount: 1,
             sampleLength: 224,
             skipSpecialTokens: true,
             withoutTimestamps: false,
-            compressionRatioThreshold: 2.4,
-            noSpeechThreshold: 0.6
+            compressionRatioThreshold: nil,
+            noSpeechThreshold: 0.45
         )
 
         var parsedSegments: [TranscriptSegment] = []
 
+        AppLog.info("WhisperKit transcribe() 调用开始")
         let results = try await pipe.transcribe(audioPath: audioURL.path, decodeOptions: options)
+        AppLog.info("WhisperKit transcribe() 返回: \(results.first?.segments.count ?? 0) 段")
 
         if let result = results.first {
             for (index, segment) in result.segments.enumerated() {

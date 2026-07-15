@@ -63,7 +63,7 @@ struct MeetingListView: View {
                     }
                     .frame(width: 32)
                     .help(loc("start_meeting"))
-                    .disabled(!SettingsManager.shared.anyModelAvailable)
+                    .disabled(!SettingsManager.shared.isModelAvailable)
                 }
             }
             .sheet(isPresented: $recordingVM.showNewMeetingSheet) {
@@ -93,16 +93,12 @@ struct MeetingListView: View {
                 // 检测已下载的模型版本
                 let s = SettingsManager.shared
                 if s.modelVersion.isEmpty, !s.modelPath.isEmpty {
-                    // 尝试从路径检测（模型在 modelPath/models/argmaxinc/whisperkit-coreml/ 下）
                     let repoPath = URL(fileURLWithPath: s.modelPath)
                         .appendingPathComponent("models/argmaxinc/whisperkit-coreml").path
-                    for v in ["openai_whisper-large-v3", "openai_whisper-large-v3_turbo", "openai_whisper-medium"] {
-                        let check = URL(fileURLWithPath: repoPath).appendingPathComponent(v)
-                        var isDir: ObjCBool = false
-                        if FileManager.default.fileExists(atPath: check.path, isDirectory: &isDir), isDir.boolValue {
-                            s.modelVersion = v
-                            break
-                        }
+                    let check = URL(fileURLWithPath: repoPath).appendingPathComponent("openai_whisper-large-v3")
+                    var isDir: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: check.path, isDirectory: &isDir), isDir.boolValue {
+                        s.modelVersion = "openai_whisper-large-v3"
                     }
                 }
                 if listVM == nil {
@@ -133,18 +129,12 @@ struct MeetingListView: View {
                 ProgressView().scaleEffect(0.7)
                 Text("\(loc("model_downloading")) \(Int(settings.currentModelProgress * 100))%")
                     .font(.caption).foregroundStyle(.orange)
-            } else if settings.allModelsUnavailable {
+            } else if !settings.isModelAvailable {
                 Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
                 Text(loc("voice_model_not_ready")).font(.caption).foregroundStyle(.orange)
-            } else if let availableModel = settings.allVoices.first(where: {
-                let s = settings.downloadState(for: $0)
-                return s.isDownloaded && !s.isDownloading
-            }) {
-                Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
-                Text("\(availableModel) \(loc("model_ready_suffix"))").font(.caption).foregroundStyle(.secondary)
             } else {
-                Image(systemName: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
-                Text(loc("voice_model_not_ready")).font(.caption).foregroundStyle(.orange)
+                Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                Text("openai/whisper-large-v3 \(loc("model_ready_suffix"))").font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding()
