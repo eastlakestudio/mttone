@@ -17,6 +17,9 @@ struct ReviewingView: View {
     @State private var pendingRetryAction: (() -> Void)?
     @State private var queuedSegments: [TranscriptSegment] = []
     @State private var queueIndex = 0
+    @State private var activeSegmentDebounceTask: Task<Void, Never>?
+    @State private var pendingActiveSegmentId: String?
+    @State private var playingSegmentId: String?
 
     private var diarizationProgress: (separated: Int, total: Int)? {
         guard let meeting = viewModel.currentMeeting, meeting.duration > 0 else { return nil }
@@ -275,14 +278,27 @@ struct ReviewingView: View {
             .onChange(of: viewModel.audioPlayer.currentTime) { _, time in
                 // 多段时间重叠时，选当前时间离段中点最近的（避开边界歧义）
                 let matching = viewModel.transcriptSegments.filter { $0.startTime <= time && $0.endTime >= time }
+                let best: TranscriptSegment?
                 if matching.count == 1 {
-                    activeSegmentId = matching[0].id
-                } else if let best = matching.min(by: { a, b in
-                    let midA = (a.startTime + a.endTime) / 2
-                    let midB = (b.startTime + b.endTime) / 2
-                    return abs(time - midA) < abs(time - midB)
-                }) {
-                    activeSegmentId = best.id
+                    best = matching[0]
+                } else {
+                    best = matching.min(by: { a, b in
+                        let midA = (a.startTime + a.endTime) / 2
+                        let midB = (b.startTime + b.endTime) / 2
+                        return abs(time - midA) < abs(time - midB)
+                    })
+                }
+                guard let targetId = best?.id else { return }
+                // 已激活或已在等待中，跳过
+                guard targetId != activeSegmentId, targetId != pendingActiveSegmentId else { return }
+                // 防抖：延迟 0.15s 再切换底色，吞掉瞬时跳变
+                activeSegmentDebounceTask?.cancel()
+                pendingActiveSegmentId = targetId
+                activeSegmentDebounceTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
+                    activeSegmentId = targetId
+                    pendingActiveSegmentId = nil
                 }
             }
             .onChange(of: viewModel.audioPlayer.isPlaying) { _, playing in
@@ -600,6 +616,13 @@ struct ReviewingView: View {
     }
 
     private func playSegment(_ segment: TranscriptSegment) {
+        // 同一段再次点击 → 暂停
+        if playingSegmentId == segment.id && viewModel.audioPlayer.isPlaying {
+            viewModel.audioPlayer.pause()
+            return
+        }
+        playingSegmentId = segment.id
+        
         if let meeting = viewModel.currentMeeting {
             let url = meeting.localAudioURL
             if !viewModel.audioPlayer.hasPlayer {
@@ -613,7 +636,7 @@ struct ReviewingView: View {
                 .filter { $0.speakerLabel == speaker && $0.isFinal }
                 .sorted { $0.startTime < $1.startTime }
             if let idx = sameSpeaker.firstIndex(where: { $0.id == segment.id }) {
-                queuedSegments = Array(sameSpeaker.dropFirst(idx))
+                queuedSegments = Array(sameSpeaker.dropFirst(idx + 1))
                 queueIndex = 0
             } else {
                 queuedSegments = []
@@ -632,10 +655,12 @@ struct ReviewingView: View {
     private func playNextQueued() {
         guard queueIndex < queuedSegments.count else {
             queuedSegments = []
+            playingSegmentId = nil
             return
         }
         let seg = queuedSegments[queueIndex]
         queueIndex += 1
+        playingSegmentId = seg.id
         // 短暂延迟，让音频引擎完成上一段的停止状态转换
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak viewModel] in
             viewModel?.audioPlayer.playbackEndTime = seg.endTime
