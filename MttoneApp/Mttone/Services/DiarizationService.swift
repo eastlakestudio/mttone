@@ -22,7 +22,7 @@ actor DiarizationService {
         if let manager = manager {
             return manager
         }
-        let config = OfflineDiarizerConfig(clusteringThreshold: 0.75)
+        let config = OfflineDiarizerConfig(clusteringThreshold: 0.82)
         let newManager = OfflineDiarizerManager(config: config)
         try await newManager.prepareModels()
         self.manager = newManager

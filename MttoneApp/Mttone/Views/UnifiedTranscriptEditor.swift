@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// 收集各段在 ScrollView 坐标系中的位置
+struct SegmentFrameKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 struct UnifiedTranscriptEditor: View {
     @Binding var segments: [TranscriptSegment]
     @Binding var filterSpeaker: String?
@@ -8,6 +16,9 @@ struct UnifiedTranscriptEditor: View {
     var contacts: [String] = []
     var onPlaySegment: ((TranscriptSegment) -> Void)?
     var onSpeakerChanged: ((String, String) -> Void)?
+
+    @State private var segmentFrames: [String: CGRect] = [:]
+    @State private var scrollViewHeight: CGFloat = 0
 
     private var attendeeList: [String] {
         if meetingAttendees.isEmpty { return [] }
@@ -81,6 +92,14 @@ struct UnifiedTranscriptEditor: View {
                                 onPlay: { onPlaySegment?(seg) }
                             )
                             .id(seg.id)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: SegmentFrameKey.self,
+                                        value: [seg.id: geo.frame(in: .named("ts"))]
+                                    )
+                                }
+                            )
                             
                             // 淡分割线（非最后一项）
                             if displayedIdx != displayedSegments.last?.0 {
@@ -92,9 +111,34 @@ struct UnifiedTranscriptEditor: View {
                         }
                     }
                 }
+                .coordinateSpace(name: "ts")
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { scrollViewHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, h in scrollViewHeight = h }
+                    }
+                )
+                .onPreferenceChange(SegmentFrameKey.self) { segmentFrames = $0 }
                 .onChange(of: activeSegmentId) { _, newId in
-                    if let id = newId {
-                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    guard let id = newId else { return }
+                    // 底色先切换（即时生效，通过 isActive 绑定）
+                    // 延迟滚动，确保高亮切换完成，再判断是否需要滚动
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        let em: CGFloat = 18
+                        let threshold: CGFloat = 6 * em
+                        let shouldScroll: Bool
+                        if let frame = segmentFrames[id], scrollViewHeight > 0 {
+                            // 仅当段在可视区底部 6em 内或已滚出顶部时才触发滚动
+                            shouldScroll = frame.minY > scrollViewHeight - threshold || frame.minY < -threshold
+                        } else {
+                            shouldScroll = true
+                        }
+                        if shouldScroll {
+                            withAnimation(.easeOut(duration: 2.0)) {
+                                proxy.scrollTo(id, anchor: .top)
+                            }
+                        }
                     }
                 }
             }

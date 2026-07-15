@@ -92,16 +92,19 @@ final class AudioRecorder {
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
-            try? self.audioFile?.write(from: buffer)
-            self.updateAmplitude(buffer: buffer)
+            
+            // 针对语音做自适应增强：有说话时强力增益，静音时不放大噪声
+            let gainedBuffer = self.applySpeechEnhancement(to: buffer)
+            try? self.audioFile?.write(from: gainedBuffer)
+            self.updateAmplitude(buffer: gainedBuffer)
             
             var floatArray: [Float] = []
-            if buffer.format.sampleRate == Double(WhisperKit.sampleRate) && buffer.format.channelCount == 1 {
-                floatArray = AudioProcessor.convertBufferToArray(buffer: buffer)
+            if gainedBuffer.format.sampleRate == Double(WhisperKit.sampleRate) && gainedBuffer.format.channelCount == 1 {
+                floatArray = AudioProcessor.convertBufferToArray(buffer: gainedBuffer)
             } else {
                 guard let converter = self.audioConverter else { return }
                 do {
-                    let resampled = try AudioProcessor.resampleBuffer(buffer, with: converter)
+                    let resampled = try AudioProcessor.resampleBuffer(gainedBuffer, with: converter)
                     floatArray = AudioProcessor.convertBufferToArray(buffer: resampled)
                 } catch {
                     // resample error
@@ -249,6 +252,55 @@ final class AudioRecorder {
         DispatchQueue.main.async {
             self.currentAmplitude = self.currentAmplitude * 0.7 + avg * 0.3
         }
+    }
+    
+    /// 自适应语音增强：根据缓冲区峰值电平动态计算增益
+    /// - 有语音时（峰值 > 噪声门限）：放大到目标峰值 -3dBFS，最大增益 10x
+    /// - 静音/纯噪声时（峰值 ≤ 门限）：不做放大，避免抬升底噪
+    private func applySpeechEnhancement(to buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return buffer }
+        
+        // 找到当前 buffer 的峰值幅度
+        var peak: Float = 0
+        for ch in 0..<Int(buffer.format.channelCount) {
+            guard let data = buffer.floatChannelData?[ch] else { continue }
+            for i in 0..<frameLength {
+                peak = max(peak, abs(data[i]))
+            }
+        }
+        
+        // 语音增强参数
+        let noiseGate: Float = 0.002      // 低于此峰值视为静音/噪声，不做增益
+        let targetPeak: Float = 0.7        // 目标峰值 -3dBFS
+        let maxGain: Float = 10.0          // 最大增益倍数，防止极端放大
+        let baseGain: Float = 1.5          // 中高电平语音的基础增益
+        
+        let gain: Float
+        if peak > noiseGate {
+            // 有语音：计算将峰值推到目标所需的增益，加上基础增益
+            let neededGain = targetPeak / peak
+            gain = min(maxGain, max(baseGain, neededGain))
+        } else {
+            // 静音/底噪：仅保留原始电平，不做放大
+            gain = 1.0
+        }
+        
+        // 应用增益到输出 buffer
+        guard let output = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameCapacity) else {
+            return buffer
+        }
+        output.frameLength = buffer.frameLength
+        
+        for ch in 0..<Int(buffer.format.channelCount) {
+            guard let inputData = buffer.floatChannelData?[ch],
+                  let outputData = output.floatChannelData?[ch] else { continue }
+            for i in 0..<frameLength {
+                let sample = inputData[i] * gain
+                outputData[i] = max(-1.0, min(1.0, sample))  // 硬限幅防破音
+            }
+        }
+        return output
     }
 }
 

@@ -2,6 +2,7 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+import UniformTypeIdentifiers
 
 /// 录音结束后的回顾页面
 struct ReviewingView: View {
@@ -14,6 +15,8 @@ struct ReviewingView: View {
     @State private var showDebugLog = false
     @State private var showRetryConfirm = false
     @State private var pendingRetryAction: (() -> Void)?
+    @State private var queuedSegments: [TranscriptSegment] = []
+    @State private var queueIndex = 0
 
     private var diarizationProgress: (separated: Int, total: Int)? {
         guard let meeting = viewModel.currentMeeting, meeting.duration > 0 else { return nil }
@@ -100,27 +103,50 @@ struct ReviewingView: View {
                 }
             }
             
-            // 第二行：导出（左）+ 拷贝（右）
-            HStack(spacing: 12) {
+            // 第二行：导出音频 / 导出纪要 / 拷贝纪要（双图标，紧凑排列）
+            HStack(spacing: 8) {
                 Button {
-                    exportMeetingRecord()
+                    exportAudioFile()
                 } label: {
-                    Label(loc("export"), systemImage: "square.and.arrow.up")
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform")
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .tint(.purple)
                 .controlSize(.regular)
+                .help(loc("export_audio"))
+                
+                Button {
+                    exportMeetingRecord()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.richtext")
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.purple)
+                .controlSize(.regular)
+                .help(loc("export"))
                 
                 Button {
                     copyToClipboard()
                 } label: {
-                    Label(loc("copy"), systemImage: "doc.on.doc")
-                        .font(.body)
-                        .fontWeight(.medium)
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.plaintext")
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .tint(.purple)
@@ -247,9 +273,28 @@ struct ReviewingView: View {
                 }
             }
             .onChange(of: viewModel.audioPlayer.currentTime) { _, time in
-                if let seg = viewModel.transcriptSegments.first(where: { $0.startTime <= time && $0.endTime >= time }) {
-                    activeSegmentId = seg.id
+                // 多段时间重叠时，选当前时间离段中点最近的（避开边界歧义）
+                let matching = viewModel.transcriptSegments.filter { $0.startTime <= time && $0.endTime >= time }
+                if matching.count == 1 {
+                    activeSegmentId = matching[0].id
+                } else if let best = matching.min(by: { a, b in
+                    let midA = (a.startTime + a.endTime) / 2
+                    let midB = (b.startTime + b.endTime) / 2
+                    return abs(time - midA) < abs(time - midB)
+                }) {
+                    activeSegmentId = best.id
                 }
+            }
+            .onChange(of: viewModel.audioPlayer.isPlaying) { _, playing in
+                if !playing && !queuedSegments.isEmpty {
+                    // 当前段播完，自动播放下一个
+                    playNextQueued()
+                }
+            }
+            .onChange(of: filterSpeaker) { _, _ in
+                // 切换/清除说话人过滤时，清空播放队列
+                queuedSegments = []
+                viewModel.audioPlayer.playbackEndTime = nil
             }
             .sheet(isPresented: $showDebugLog) {
                 DebugLogView()
@@ -351,21 +396,8 @@ struct ReviewingView: View {
             contacts: databaseManager.fetchAllContacts().map { $0.name },
             onPlaySegment: { seg in playSegment(seg) },
             onSpeakerChanged: { segId, newSpeaker in
-                if let idx = viewModel.transcriptSegments.firstIndex(where: { $0.id == segId }) {
-                    let oldLabel = viewModel.transcriptSegments[idx].speakerLabel
-                    viewModel.transcriptSegments[idx].speakerLabel = newSpeaker
-                    var contact = databaseManager.fetchContact(byName: newSpeaker)
-                    if contact == nil {
-                        contact = Contact.create(name: newSpeaker)
-                        try? databaseManager.saveContact(contact!)
-                    }
-                    viewModel.transcriptSegments[idx].contactId = contact?.id
-                    // 用原始 diarization label 查找正确的声纹向量
-                    if let cid = contact?.id {
-                        viewModel.saveEmbeddingForSpeaker(speakerLabel: oldLabel, contactId: cid)
-                    }
-                }
-                addAttendeeFromLabel(newSpeaker)
+                    viewModel.updateSpeakerLabel(id: segId, newLabel: newSpeaker)
+                    addAttendeeFromLabel(newSpeaker)
             }
         )
         .padding()
@@ -470,6 +502,26 @@ struct ReviewingView: View {
 
     // MARK: - 辅助
 
+    private func exportAudioFile() {
+        guard let meeting = viewModel.currentMeeting else { return }
+        let sourceURL = meeting.localAudioURL
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else { return }
+        
+        #if os(macOS)
+        let savePanel = NSSavePanel()
+        savePanel.title = loc("export_audio")
+        let ext = sourceURL.pathExtension
+        savePanel.nameFieldStringValue = "\(meeting.title).\(ext)"
+        if !ext.isEmpty {
+            savePanel.allowedContentTypes = [UTType(filenameExtension: ext) ?? .audio]
+        }
+        savePanel.canCreateDirectories = true
+        if savePanel.runModal() == .OK, let destURL = savePanel.url {
+            try? FileManager.default.copyItem(at: sourceURL, to: destURL)
+        }
+        #endif
+    }
+
     private func copyToClipboard() {
         guard let meeting = viewModel.currentMeeting else { return }
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
@@ -554,10 +606,43 @@ struct ReviewingView: View {
                 viewModel.audioPlayer.startPlaying(url: url)
             }
         }
+        
+        // 如果当前按说话人过滤，构建该说话人的连续播放队列
+        if let speaker = filterSpeaker {
+            let sameSpeaker = viewModel.transcriptSegments
+                .filter { $0.speakerLabel == speaker && $0.isFinal }
+                .sorted { $0.startTime < $1.startTime }
+            if let idx = sameSpeaker.firstIndex(where: { $0.id == segment.id }) {
+                queuedSegments = Array(sameSpeaker.dropFirst(idx))
+                queueIndex = 0
+            } else {
+                queuedSegments = []
+            }
+        } else {
+            queuedSegments = []
+        }
+        
         viewModel.audioPlayer.playbackEndTime = segment.endTime
         viewModel.audioPlayer.seek(to: segment.startTime)
         if !viewModel.audioPlayer.isPlaying {
             viewModel.audioPlayer.resume()
+        }
+    }
+    
+    private func playNextQueued() {
+        guard queueIndex < queuedSegments.count else {
+            queuedSegments = []
+            return
+        }
+        let seg = queuedSegments[queueIndex]
+        queueIndex += 1
+        // 短暂延迟，让音频引擎完成上一段的停止状态转换
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak viewModel] in
+            viewModel?.audioPlayer.playbackEndTime = seg.endTime
+            viewModel?.audioPlayer.seek(to: seg.startTime)
+            if viewModel?.audioPlayer.isPlaying == false {
+                viewModel?.audioPlayer.resume()
+            }
         }
     }
 
