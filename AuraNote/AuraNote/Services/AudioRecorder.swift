@@ -1,0 +1,453 @@
+import AVFoundation
+import WhisperKit
+
+/// 音频录制 + 基于 WhisperKit 的本地实时转写服务
+/// 流水线：始终录音 → 静默切割为 AudioChunk → 异步转写回填文本 → 声纹事后处理
+@Observable
+final class AudioRecorder {
+
+    // MARK: - 公开状态
+
+    var isRecording = false
+    var audioChunks: [AudioChunk] = []     // 根据静默切割的音频片段列表
+    var currentAmplitude: Float = 0.0       // 用于音量可视化（0.0 ~ 1.0）
+    var isListening: Bool = false            // 当前是否有语音活动（用于 UI 指示器）
+    var errorMessage: String?
+
+    /// 联系人提供者：返回 [(id, name, embedding)] 用于实时声纹匹配
+    var contactsProvider: (() async -> [(id: String, name: String, embedding: [Float])])?
+    /// 声纹匹配成功回调：自动将匹配到的联系人添加为会议参会人
+    var onSpeakerMatched: ((_ contactId: String, _ contactName: String) -> Void)?
+
+    // MARK: - 私有属性
+
+    private let audioEngine = AVAudioEngine()
+    private var audioFile: AVAudioFile?
+    private var audioConverter: AVAudioConverter?
+    
+    private var recordingStartTime: Date?
+    private var currentMeetingId: String?
+
+    // 音频切割流水线
+    private var currentChunkBuffer: [Float] = []   // 当前片段的累积音频
+    private var currentChunkStartTime: Date?        // 当前片段的首个语音时间
+    private var chunkCounter: Int = 0               // 片段序号
+    private var pauseTimer: Timer?                  // 静默计时器，触发后切割片段
+
+    init() {}
+
+    // MARK: - 权限请求
+
+    func requestPermissions() async -> Bool {
+        let micGranted: Bool
+        #if os(iOS)
+        if #available(iOS 17.0, *) {
+            micGranted = await AVAudioApplication.requestRecordPermission()
+        } else {
+            micGranted = await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+        #else
+        micGranted = true
+        #endif
+        guard micGranted else {
+            errorMessage = loc("mic_permission_required")
+            return false
+        }
+        return true
+    }
+
+    // MARK: - 开始录音
+
+    func startRecording(meetingId: String, savePath: URL, contextualStrings: [String] = []) throws {
+        // 重置状态
+        audioChunks = []
+        errorMessage = nil
+        currentChunkBuffer = []
+        currentChunkStartTime = nil
+        chunkCounter = 0
+        isListening = false
+        currentMeetingId = meetingId
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+
+        // 配置 Audio Session (仅 iOS)
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .default, options: [.duckOthers])
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        #endif
+
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        let wavSavePath = savePath.deletingPathExtension().appendingPathExtension("wav")
+        audioFile = try AVAudioFile(
+            forWriting: wavSavePath,
+            settings: recordingFormat.settings
+        )
+        
+        let whisperFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(WhisperKit.sampleRate), channels: 1, interleaved: false)!
+        self.audioConverter = AVAudioConverter(from: recordingFormat, to: whisperFormat)
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+            guard let self = self else { return }
+            
+            // VAD 用原始振幅判停，避免增益抬升底噪导致误判为持续说话
+            let rawAmplitude = self.computeAmplitude(buffer: buffer)
+            
+            // 针对语音做自适应增强：有说话时强力增益，静音时不放大噪声
+            let gainedBuffer = self.applySpeechEnhancement(to: buffer)
+            do {
+                try self.audioFile?.write(from: gainedBuffer)
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = String(format: "音频写入失败: %@", error.localizedDescription)
+                }
+            }
+            // 可视化用增益后的振幅（EMA 平滑）
+            self.currentAmplitude = self.currentAmplitude * 0.7 + rawAmplitude * 0.3
+            
+            var floatArray: [Float] = []
+            if gainedBuffer.format.sampleRate == Double(WhisperKit.sampleRate) && gainedBuffer.format.channelCount == 1 {
+                floatArray = AudioProcessor.convertBufferToArray(buffer: gainedBuffer)
+            } else {
+                guard let converter = self.audioConverter else { return }
+                do {
+                    let resampled = try AudioProcessor.resampleBuffer(gainedBuffer, with: converter)
+                    floatArray = AudioProcessor.convertBufferToArray(buffer: resampled)
+                } catch {
+                    // resample error
+                }
+            }
+            
+            // VAD 用未平滑的原始振幅，即时响应停顿，避免长句不切分
+            self.appendAudioAndSegment(floatArray, rawAmplitude: rawAmplitude)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+
+        recordingStartTime = Date()
+        isRecording = true
+    }
+
+    // MARK: - 停止录音
+
+    func stopRecording() -> Int {
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+
+        audioFile = nil
+        audioConverter = nil
+        
+        // 切割最后一个未完成的片段
+        if !currentChunkBuffer.isEmpty {
+            cutCurrentChunk()
+        }
+        
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+
+        let duration: Int
+        if let start = recordingStartTime {
+            duration = Int(Date().timeIntervalSince(start))
+        } else {
+            duration = 0
+        }
+
+        isRecording = false
+        currentAmplitude = 0
+
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false)
+        #endif
+
+        return duration
+    }
+
+    // MARK: - 内部方法
+
+    // MARK: - 音频分割（VAD 纯分割器，不参与录制决策）
+
+    /// 始终追加音频到当前片段 buffer，VAD 仅用于判断何时切割
+    /// - Parameter rawAmplitude: 原始振幅（未经 EMA 平滑），用于即时停顿检测
+    private func appendAudioAndSegment(_ audio: [Float], rawAmplitude: Float) {
+        DispatchQueue.main.async {
+            self.currentChunkBuffer.append(contentsOf: audio)
+            
+            let settings = SettingsManager.shared
+            if rawAmplitude > settings.silenceThreshold {
+                // 有语音活动：记录片段起始时间，重置静默计时器
+                let now = Date()
+                if self.currentChunkStartTime == nil {
+                    self.currentChunkStartTime = now
+                }
+                self.isListening = true
+                self.pauseTimer?.invalidate()
+                self.pauseTimer = Timer.scheduledTimer(withTimeInterval: settings.pauseWindow, repeats: false) { [weak self] _ in
+                    self?.cutCurrentChunk()
+                }
+                
+                // 超过最大时长强制切分（防止连续说话导致单段过长）
+                let chunkDuration = Double(self.currentChunkBuffer.count) / Double(WhisperKit.sampleRate)
+                if chunkDuration >= settings.maxChunkDuration {
+                    self.cutCurrentChunk()
+                }
+            } else {
+                // 静默：不做任何事，等待 pauseTimer 触发切割
+                // 如果从未有过语音活动（pauseTimer 从未创建），丢弃过长的纯静音
+                if self.pauseTimer == nil && self.currentChunkStartTime == nil {
+                    let maxSilentSamples = 16000 * 2
+                    let keepSamples = 8000
+                    if self.currentChunkBuffer.count > maxSilentSamples {
+                        self.currentChunkBuffer = Array(self.currentChunkBuffer.suffix(keepSamples))
+                    }
+                }
+            }
+        }
+    }
+
+    /// 切割当前音频片段：创建 AudioChunk 加入列表，投递异步转写
+    private func cutCurrentChunk() {
+        guard let meetingId = currentMeetingId, let start = recordingStartTime else { return }
+        guard !currentChunkBuffer.isEmpty else {
+            // 空片段（纯静音后触发），只重置状态
+            currentChunkStartTime = nil
+            isListening = false
+            return
+        }
+
+        // 检查片段是否有足够的语音能量（过滤纯噪声片段，防止 Whisper 幻觉）
+        let avgEnergy = currentChunkBuffer.reduce(0) { $0 + abs($1) } / Float(currentChunkBuffer.count)
+        let minSpeechEnergy: Float = 0.003  // 低于此值视为纯噪声，不创建片段
+        guard avgEnergy >= minSpeechEnergy else {
+            AppLog.info("Discarded low-energy noise segment avgEnergy=\(String(format: "%.5f", avgEnergy))")
+            currentChunkBuffer = []
+            currentChunkStartTime = nil
+            isListening = false
+            return
+        }
+        
+        let now = Date()
+        let chunkStartTime = currentChunkStartTime?.timeIntervalSince(start) ?? max(0, now.timeIntervalSince(start) - Double(currentChunkBuffer.count) / Double(WhisperKit.sampleRate))
+        let chunkEndTime = now.timeIntervalSince(start)
+        
+        let chunk = AudioChunk(
+            id: "\(meetingId)_chunk_\(chunkCounter)",
+            meetingId: meetingId,
+            startTime: chunkStartTime,
+            endTime: chunkEndTime,
+            audioSamples: currentChunkBuffer,
+            text: nil,
+            isTranscribing: false,
+            speakerLabel: nil
+        )
+        
+        chunkCounter += 1
+        audioChunks.append(chunk)
+        
+        // 重置当前片段状态
+        currentChunkBuffer = []
+        currentChunkStartTime = nil
+        isListening = false
+        
+        // 异步投递转写任务
+        let capturedChunk = chunk
+        Task { [weak self] in
+            await self?.transcribeChunk(capturedChunk)
+        }
+    }
+
+    /// 异步转写单个音频片段，完成后回填 text
+    private func transcribeChunk(_ chunk: AudioChunk) async {
+        // 标记为转写中
+        await MainActor.run {
+            guard let idx = self.audioChunks.firstIndex(where: { $0.id == chunk.id }) else { return }
+            self.audioChunks[idx].isTranscribing = true
+        }
+        
+        // 等待模型就绪
+        guard await WhisperService.shared.isReady else {
+            AppLog.warn("Transcribe chunk \(chunk.id) failed: model not ready")
+            await MainActor.run {
+                guard let idx = self.audioChunks.firstIndex(where: { $0.id == chunk.id }) else { return }
+                self.audioChunks[idx].isTranscribing = false
+            }
+            return
+        }
+        
+        do {
+            let text = try await WhisperService.shared.transcribeLive(audioArray: chunk.audioSamples)
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+
+            // 防止 Whisper 静音幻觉：过滤异常长文本或明显错误的输出
+            if isHallucination(trimmed, chunk: chunk) {
+                AppLog.info("Discarded suspected hallucination text: \"\(trimmed.prefix(50))...\"")
+                await MainActor.run {
+                    guard let idx = self.audioChunks.firstIndex(where: { $0.id == chunk.id }) else { return }
+                    self.audioChunks[idx].isTranscribing = false
+                }
+                return
+            }
+
+            await MainActor.run {
+                guard let idx = self.audioChunks.firstIndex(where: { $0.id == chunk.id }) else { return }
+                // 空文本用 "" 而非 nil，UI 可据此区分「已处理但无内容」vs「尚未处理」
+                self.audioChunks[idx].text = trimmed.isEmpty ? "" : trimmed
+                self.audioChunks[idx].isTranscribing = false
+            }
+
+            // 并行提取声纹 + 匹配联系人（有实质文本才跑声纹）
+            if trimmed.isEmpty { return }
+            Task { [weak self] in
+                await self?.matchSpeakerForChunk(chunk)
+            }
+        } catch {
+            AppLog.warn("Transcribe chunk \(chunk.id) failed: \(error.localizedDescription)")
+            await MainActor.run {
+                guard let idx = self.audioChunks.firstIndex(where: { $0.id == chunk.id }) else { return }
+                self.audioChunks[idx].isTranscribing = false
+            }
+        }
+    }
+
+    /// 检测 Whisper 静音幻觉：短音频产出异常长文本，或包含明显训练数据残留
+    private func isHallucination(_ text: String, chunk: AudioChunk) -> Bool {
+        guard !text.isEmpty else { return false }
+
+        let duration = chunk.endTime - chunk.startTime
+        // 正常语速约 3-5 字/秒。若超过 20 字/秒，极可能是幻觉
+        let charsPerSecond = Double(text.count) / max(duration, 0.5)
+        if charsPerSecond > 20 {
+            return true
+        }
+
+        // 常见 Whisper 幻觉模式（训练数据中的直播/视频用语残留）
+        let hallucinationPatterns = [
+            "点赞", "订阅", "转发", "打赏", "关注",
+            "一键三连", "弹幕", "评论区",
+            "请不吝", "明镜与点点",
+            "Thank you for watching", "Please subscribe",
+        ]
+        for pattern in hallucinationPatterns {
+            if text.contains(pattern) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /// 为已转写的片段提取声纹并匹配已知联系人
+    private func matchSpeakerForChunk(_ chunk: AudioChunk) async {
+        guard let provider = contactsProvider else {
+            AppLog.info("Voiceprint matching: contactsProvider not set")
+            return
+        }
+        let contacts = await provider()
+        guard !contacts.isEmpty else {
+            AppLog.info("Voiceprint matching: contacts list empty (no contacts with stored voiceprints)")
+            return
+        }
+        AppLog.info("Voiceprint matching: \(contacts.count) candidates, chunk duration \(String(format: "%.1f", chunk.endTime - chunk.startTime))s")
+
+        guard let embedding = await DiarizationService.shared.extractEmbedding(from: chunk.audioSamples) else {
+            AppLog.info("Voiceprint matching: embedding extraction failed")
+            return
+        }
+
+        guard let match = DiarizationService.matchSingleEmbedding(
+            embedding, against: contacts,
+            threshold: SettingsManager.shared.liveMatchingThreshold
+        ) else {
+            AppLog.info("Voiceprint matching: below threshold (threshold=\(SettingsManager.shared.liveMatchingThreshold))")
+            return
+        }
+
+        await MainActor.run {
+            guard let idx = self.audioChunks.firstIndex(where: { $0.id == chunk.id }) else { return }
+            self.audioChunks[idx].speakerLabel = match.contactName
+        }
+        AppLog.info("Voiceprint matched: \(match.contactName) (score=\(String(format: "%.3f", match.score)))")
+        
+        // 自动将匹配到的联系人添加为会议参会人
+        onSpeakerMatched?(match.contactId, match.contactName)
+    }
+
+    /// 计算原始音频的平均幅度（用于 VAD 静音检测，不受增益干扰）
+    private func computeAmplitude(buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData?[0] else { return 0 }
+        let frameLength = Int(buffer.frameLength)
+        var sum: Float = 0
+        for i in 0..<frameLength {
+            sum += abs(channelData[i])
+        }
+        return sum / Float(frameLength)
+    }
+    
+    /// 自适应语音增强：根据缓冲区峰值电平动态计算增益
+    /// - 有语音时（峰值 > 噪声门限）：放大到目标峰值 -3dBFS，最大增益 10x
+    /// - 静音/纯噪声时（峰值 ≤ 门限）：不做放大，避免抬升底噪
+    private func applySpeechEnhancement(to buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return buffer }
+        
+        // 找到当前 buffer 的峰值幅度
+        var peak: Float = 0
+        for ch in 0..<Int(buffer.format.channelCount) {
+            guard let data = buffer.floatChannelData?[ch] else { continue }
+            for i in 0..<frameLength {
+                peak = max(peak, abs(data[i]))
+            }
+        }
+        
+        // 语音增强参数（可在系统配置中调节）
+        let settings = SettingsManager.shared
+        let noiseGate: Float = settings.noiseGate    // 低于此峰值视为静音/噪声，不做增益
+        let targetPeak: Float = settings.targetPeak   // 目标峰值 -3dBFS
+        let maxGain: Float = settings.maxGain         // 最大增益倍数，防止极端放大
+        let baseGain: Float = settings.baseGain       // 中高电平语音的基础增益
+        
+        let gain: Float
+        if peak > noiseGate {
+            // 有语音：计算将峰值推到目标所需的增益，加上基础增益
+            let neededGain = targetPeak / peak
+            gain = min(maxGain, max(baseGain, neededGain))
+        } else {
+            // 静音/底噪：仅保留原始电平，不做放大
+            gain = 1.0
+        }
+        
+        // 应用增益到输出 buffer
+        guard let output = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameCapacity) else {
+            return buffer
+        }
+        output.frameLength = buffer.frameLength
+        
+        for ch in 0..<Int(buffer.format.channelCount) {
+            guard let inputData = buffer.floatChannelData?[ch],
+                  let outputData = output.floatChannelData?[ch] else { continue }
+            for i in 0..<frameLength {
+                let sample = inputData[i] * gain
+                outputData[i] = max(-1.0, min(1.0, sample))  // 硬限幅防破音
+            }
+        }
+        return output
+    }
+}
+
+// MARK: - 错误类型
+
+enum RecorderError: LocalizedError {
+    case microphoneAccessDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .microphoneAccessDenied: return loc("mic_permission_denied")
+        }
+    }
+}

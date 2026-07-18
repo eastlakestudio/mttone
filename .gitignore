@@ -25,3 +25,4 @@ src-tauri/target/
 node_modules/
 
 MttoneApp/build_output/
+AuraNote/build_output/

@@ -1,0 +1,79 @@
+import SwiftUI
+#if os(macOS)
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // 移除不必要的系统菜单，仅保留 App 菜单（关于、退出等）
+        guard let mainMenu = NSApp.mainMenu else { return }
+        let toRemove = ["File", "Edit", "View", "Format", "Window", "Help"]
+        let itemsToRemove = mainMenu.items.filter { toRemove.contains($0.title) }
+        for item in itemsToRemove {
+            mainMenu.removeItem(item)
+        }
+    }
+}
+#endif
+
+@main
+struct AuraNoteApp: App {
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
+    @State private var databaseManager = DatabaseManager()
+    @State private var modelLoadError: String?
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .frame(minWidth: 960, minHeight: 760)
+                .environment(databaseManager)
+                .task {
+                    // 启动时预加载语音模型，避免进入录音界面后才阻塞等待
+                    do {
+                        try await WhisperService.shared.initialize()
+                        AppLog.info("Voice model preload completed on startup")
+                    } catch {
+                        AppLog.error("Voice model preload failed on startup: \(error.localizedDescription)")
+                        modelLoadError = error.localizedDescription
+                    }
+                }
+                .alert("语音模型", isPresented: Binding(
+                    get: { modelLoadError != nil },
+                    set: { if !$0 { modelLoadError = nil } }
+                )) {
+                    Button("确定") { modelLoadError = nil }
+                } message: {
+                    Text("模型加载失败，实时转写功能不可用，录音文件可在稍后手动转写。\n\n\(modelLoadError ?? "")")
+                }
+        }
+        .defaultSize(width: 1440, height: 900)
+        .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("关于听纪") {
+                    showAboutWindow()
+                }
+            }
+        }
+    }
+
+    #if os(macOS)
+    private func showAboutWindow() {
+        // 已存在则前置
+        if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "about" }) {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+        // 新建 About 窗口
+        let aboutVC = NSHostingController(rootView: AboutView().background(.regularMaterial))
+        let aboutWindow = NSWindow(contentViewController: aboutVC)
+        aboutWindow.identifier = NSUserInterfaceItemIdentifier("about")
+        aboutWindow.title = "关于听纪"
+        aboutWindow.styleMask = [.titled, .closable]
+        aboutWindow.setContentSize(NSSize(width: 460, height: 440))
+        aboutWindow.center()
+        aboutWindow.makeKeyAndOrderFront(nil)
+    }
+    #endif
+}
