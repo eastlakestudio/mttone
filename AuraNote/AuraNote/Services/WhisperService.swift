@@ -104,7 +104,7 @@ actor WhisperService {
             skipSpecialTokens: true,
             withoutTimestamps: false,
             compressionRatioThreshold: 2.4,  // WhisperKit 默认值，过滤循环重复幻觉
-            noSpeechThreshold: 0.6            // 提高静音过滤敏感度
+            noSpeechThreshold: 0.6            // 静音过滤敏感度
         )
 
         var parsedSegments: [TranscriptSegment] = []

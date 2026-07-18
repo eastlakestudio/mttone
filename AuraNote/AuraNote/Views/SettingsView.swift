@@ -582,7 +582,7 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                         .frame(width: labelWidth, alignment: .leading)
                                     
-                                    Text("openai/whisper-large-v3-turbo (632 MB)")
+                                    Text("openai/whisper-large-v3 (1.6 GB)")
                                         .font(.callout)
                                         .foregroundStyle(.primary)
                                     

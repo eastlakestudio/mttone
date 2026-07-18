@@ -105,9 +105,9 @@ final class SettingsManager {
     }
     
     /// 唯一支持的模型
-    static let supportedVoice = "openai/whisper-large-v3-turbo"
+    static let supportedVoice = "openai/whisper-large-v3"
     /// 模型文件系统中的目录名（与 HuggingFace 仓库路径一致）
-    static let supportedModelID = "openai_whisper-large-v3-v20240930_turbo"
+    static let supportedModelID = "openai_whisper-large-v3-v20240930"
     
     /// 单个模型的下载状态
     struct ModelDownloadState: Codable {
